@@ -1598,6 +1598,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/tasks/{taskId}/messages", h.ListTaskMessages)
 		r.Post("/tasks/{taskId}/cancel-ack", h.AckTaskCancelled)
 
+		// Ruel 新增：Run 产物（diff / diff_stat / 变更文件）。上游把结果放在
+		// agent_task_queue.result 里，没有 diff 也没有测试证据，P0-6 缺落点。
+		// 独立成一组路由，同步上游时不与相邻改动冲突。
+		r.Post("/tasks/{taskId}/artifacts", h.UpsertRuelArtifact)
+		r.Get("/tasks/{taskId}/artifacts", h.ListRuelTaskArtifacts)
+
 		r.Post("/workspaces/{workspaceId}/issues/gc-check", h.BatchIssueGCCheck)
 		r.Get("/issues/{issueId}/gc-check", h.GetIssueGCCheck)
 		r.Get("/chat-sessions/{sessionId}/gc-check", h.GetChatSessionGCCheck)
@@ -2154,6 +2160,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Squad leader evaluation (writes to activity_log)
 			r.Post("/api/issues/{id}/squad-evaluated", h.RecordSquadLeaderEvaluation)
+
+			// Ruel 新增：按 Issue 读取全部 Run 的产物。验收看的是「这个需求总共
+			// 改了什么」，多轮 Run 的变更要能一起看到，只看最后一轮会漏。
+			r.Get("/api/issues/{id}/artifacts", h.ListRuelIssueArtifacts)
 
 			// Autopilots
 			r.Route("/api/autopilots", func(r chi.Router) {
