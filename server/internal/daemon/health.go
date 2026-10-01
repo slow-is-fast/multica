@@ -93,7 +93,7 @@ type healthWorkspace struct {
 // listenHealth binds the health port. Returns the listener or an error if
 // another daemon is already running (port taken).
 func (d *Daemon) listenHealth() (net.Listener, error) {
-	addr := fmt.Sprintf("127.0.0.1:%d", d.cfg.HealthPort)
+	addr := fmt.Sprintf("0.0.0.0:%d", d.cfg.HealthPort)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("another daemon is already running on %s: %w", addr, err)
