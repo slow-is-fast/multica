@@ -14,13 +14,14 @@ import (
 const listConversationRootOwners = `-- name: ListConversationRootOwners :many
 SELECT DISTINCT ON (agent_id) agent_id, squad_id
 FROM agent_task_queue
-WHERE issue_id = $1 AND trigger_comment_id = $2 AND agent_id IS NOT NULL
+WHERE issue_id = $1 AND agent_id IS NOT NULL
+  AND (comment_thread_id = $2 OR trigger_comment_id = $2)
 ORDER BY agent_id, (squad_id IS NOT NULL) DESC, created_at DESC, id DESC
 `
 
 type ListConversationRootOwnersParams struct {
-	IssueID          pgtype.UUID `json:"issue_id"`
-	TriggerCommentID pgtype.UUID `json:"trigger_comment_id"`
+	IssueID         pgtype.UUID `json:"issue_id"`
+	CommentThreadID pgtype.UUID `json:"comment_thread_id"`
 }
 
 type ListConversationRootOwnersRow struct {
@@ -31,7 +32,7 @@ type ListConversationRootOwnersRow struct {
 // Preserve the newest non-null squad per agent, including terminal tasks.
 // Routing does not need execution context, results, or other issue threads.
 func (q *Queries) ListConversationRootOwners(ctx context.Context, arg ListConversationRootOwnersParams) ([]ListConversationRootOwnersRow, error) {
-	rows, err := q.db.Query(ctx, listConversationRootOwners, arg.IssueID, arg.TriggerCommentID)
+	rows, err := q.db.Query(ctx, listConversationRootOwners, arg.IssueID, arg.CommentThreadID)
 	if err != nil {
 		return nil, err
 	}

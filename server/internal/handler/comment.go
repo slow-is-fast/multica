@@ -2959,8 +2959,11 @@ func (h *Handler) routeConversationOwnersForRoot(ctx context.Context, issue db.I
 	if opts.ExcludeTriggerCommentID == root.ID {
 		return nil, false
 	}
+	// Keyed on the thread, not on trigger_comment_id: a merged reply re-stamps
+	// trigger_comment_id (MUL-4302), and matching on it made the thread's first
+	// merged reply erase the owner every later reply is routed by.
 	owners, err := h.Queries.ListConversationRootOwners(ctx, db.ListConversationRootOwnersParams{
-		IssueID: issue.ID, TriggerCommentID: root.ID,
+		IssueID: issue.ID, CommentThreadID: root.ID,
 	})
 	if err != nil {
 		return nil, false
