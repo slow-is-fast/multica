@@ -598,6 +598,15 @@ func (q *Queries) DeleteWorkspacePullRequests(ctx context.Context, workspaceID p
 	return err
 }
 
+const deleteWorkspaceRuelArtifacts = `-- name: DeleteWorkspaceRuelArtifacts :exec
+DELETE FROM ruel_artifacts WHERE ruel_artifacts.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceRuelArtifacts(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceRuelArtifacts, workspaceID)
+	return err
+}
+
 const deleteWorkspaceRuntimesAndProjects = `-- name: DeleteWorkspaceRuntimesAndProjects :exec
 WITH
 deleted_runtimes AS (

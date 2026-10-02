@@ -1217,6 +1217,13 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.LockTaskUsageRollupForWorkspaceDelete(ctx) },
 		},
 		{
+			// Run artifacts are keyed by task, so they go before the tasks
+			// themselves: deleting the task rows first would leave their
+			// evidence behind as orphans with no owning run.
+			name: "delete run artifacts",
+			run:  func() error { return qtx.DeleteWorkspaceRuelArtifacts(ctx, requester.WorkspaceID) },
+		},
+		{
 			// Bounded batches, after the rollup lock because it deletes
 			// task_usage. Replaces both the task-keyed arms of the old leaf
 			// data statement and the separate whole-workspace task delete.
