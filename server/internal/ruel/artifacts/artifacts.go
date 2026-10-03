@@ -28,6 +28,36 @@ const (
 	KindTestLog    = "test_log"
 )
 
+// KindCollectionStatus 是「这次采集的结论」，不是产物。
+//
+// 它回答的是「为什么这一轮没有产物」，而不是「这一轮改了什么」。分开记的理由是：
+// 「产物表里没有记录」这件事本身有四种含义——没碰仓库、碰了但没改动、采集失败、
+// 压根没采集。前两种正常，后两种是缺陷，而它们在没有结论记录时长得一模一样。
+const KindCollectionStatus = "collection_status"
+
+// 采集结论的取值。
+//
+// 前三个是「没有产物」的三种原因，changed 是「采到了」。changed 也要记，是为了与
+// 「压根没采集」区分开：库里连结论都没有，说明 daemon 没上报成功，那是第四种情况。
+const (
+	StatusChanged       = "changed"
+	StatusNoRepo        = "no_repo"
+	StatusNoChange      = "no_change"
+	StatusCollectFailed = "collect_failed"
+)
+
+// ValidStatus 判断一个字符串是不是已知的采集结论。
+//
+// 结论值要收紧而不是放行任意字符串：它是界面上直接给人看的那句话的索引，放进来一个
+// 没见过的词，前端只能显示空白，缺陷就又被藏回去了。
+func ValidStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case StatusChanged, StatusNoRepo, StatusNoChange, StatusCollectFailed:
+		return true
+	}
+	return false
+}
+
 // DBTX 是 pgx 的最小子集，形状与 handler 侧的 dbExecutor 一致。
 type DBTX interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
@@ -91,7 +121,30 @@ ON CONFLICT (task_id, kind) DO UPDATE SET
 	return err
 }
 
+// UpsertStatus 写入一次 Run 的采集结论。
+//
+// 结论不是产物，但仍然落在同一张表里：一次 Run 一条、按 (task_id, kind) 覆盖，与产物
+// 共用同一套生命周期（workspace 删除时一起清走）。为它单开一张表要连带改迁移、清理
+// 清单和它的 sqlc 生成物——那些正是将来同步上游时冲突最集中的地方，不值得。
+//
+// 入参沿用 Artifact 是为了复用 workspace/task/issue 三个归属字段；其中 Content 存
+// 结论本身，URI 存诊断信息（哪一步失败的简短原因，可以为空）。
+func (s *Store) UpsertStatus(ctx context.Context, a Artifact) error {
+	status := strings.TrimSpace(a.Content)
+	if !ValidStatus(status) {
+		return fmt.Errorf("artifact: 未知的采集结论 %q", a.Content)
+	}
+	a.Kind = KindCollectionStatus
+	a.Content = status
+	a.Checksum = Sum(status)
+	a.URI = strings.TrimSpace(a.URI)
+	return s.Upsert(ctx, a)
+}
+
 // ListByTask 列出某次 Run 的全部产物。
+//
+// 返回值里可能混着一条 kind=collection_status 的记录——那是采集结论，不是产物，由
+// 调用方按 kind 分流（前端见 packages/core/ruel/artifacts.ts 的 splitRuelArtifacts）。
 func (s *Store) ListByTask(ctx context.Context, taskID pgtype.UUID) ([]Artifact, error) {
 	rows, err := s.db.Query(ctx, `
 SELECT id, workspace_id, task_id, issue_id, kind, uri, size, checksum, COALESCE(content, ''), created_at

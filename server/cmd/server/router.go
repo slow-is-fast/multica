@@ -1603,6 +1603,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// 独立成一组路由，同步上游时不与相邻改动冲突。
 		r.Post("/tasks/{taskId}/artifacts", h.UpsertRuelArtifact)
 		r.Get("/tasks/{taskId}/artifacts", h.ListRuelTaskArtifacts)
+		// 采集结论单独一个路由：它回答「这轮为什么没有产物」，即使在没有任何产物的
+		// 那一轮也要上报，与产物写入不是一回事。
+		r.Post("/tasks/{taskId}/artifact-status", h.UpsertRuelArtifactStatus)
 
 		r.Post("/workspaces/{workspaceId}/issues/gc-check", h.BatchIssueGCCheck)
 		r.Get("/issues/{issueId}/gc-check", h.GetIssueGCCheck)

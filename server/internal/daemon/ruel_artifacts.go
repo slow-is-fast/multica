@@ -38,24 +38,62 @@ type ruelArtifactPayload struct {
 	URI     string `json:"uri"`
 }
 
-// collectRuelArtifacts 读出一个 worktree 的变更。返回空切片表示「确实没有变更」或
-// 「采集不出来」，两种情况都不算缺陷——真正的缺陷是「有变更但没采集」，那要记日志。
-func collectRuelArtifacts(workDir string) []ruelArtifactPayload {
+// ruelArtifactStatusPayload 与服务端 RuelArtifactStatusRequest 对应。
+type ruelArtifactStatusPayload struct {
+	Status     string `json:"status"`
+	Diagnostic string `json:"diagnostic"`
+}
+
+// ruelArtifactCollection 是一次采集的结果：采到了什么，以及没采到时是为什么。
+//
+// 之所以要带结论，是因为「产物表为空」这件事本身有三种截然不同的含义，而它们在
+// 数据库里长得一模一样：
+//
+//  1. no_repo——这次 Run 根本没碰代码仓库。agent 只在容器目录里写了东西（调研、
+//     读文档、写方案），没有触发 repo checkout。这是正常的一类 Run。
+//  2. no_change——碰了仓库，但确实没改动。只读任务，或者改动被 revert 回去了。
+//     这也是正常的。
+//  3. collect_failed——git 缺失、超时、权限问题。这是缺陷。
+//
+// 前两种正常、第三种是缺陷，可界面上都是「变更：无」。把结论一并存下来，界面才说得
+// 出「这轮为什么没有产物」，而不是让缺陷混在正常里一起被当成没干活。
+type ruelArtifactCollection struct {
+	Status     string
+	Diagnostic string
+	Items      []ruelArtifactPayload
+}
+
+// collectRuelArtifacts 读出一个 worktree 的变更，并给出这次采集的结论。
+func collectRuelArtifacts(workDir string) ruelArtifactCollection {
 	workDir = strings.TrimSpace(workDir)
 	if workDir == "" {
-		return nil
+		return ruelArtifactCollection{Status: artifacts.StatusNoRepo, Diagnostic: "work_dir 为空"}
 	}
 	if _, err := os.Stat(workDir); err != nil {
-		return nil
+		return ruelArtifactCollection{Status: artifacts.StatusNoRepo, Diagnostic: "work_dir 不可访问"}
+	}
+
+	// 先定位、再判断结论：定位不到仓库与「仓库里没改动」是两件事，不能都归成空。
+	repos := make([]string, 0, 1)
+	for _, repo := range ruelResolveGitDirs(workDir) {
+		if ruelIsGitRepo(repo) {
+			repos = append(repos, repo)
+		}
+	}
+	if len(repos) == 0 {
+		return ruelArtifactCollection{
+			Status:     artifacts.StatusNoRepo,
+			Diagnostic: "work_dir 下没有 git 仓库",
+		}
 	}
 
 	out := make([]ruelArtifactPayload, 0, 3)
-	for _, repo := range ruelResolveGitDirs(workDir) {
-		if !ruelIsGitRepo(repo) {
-			continue
-		}
+	failed := 0
+	var firstErr string
+	for _, repo := range repos {
 		if err := ruelMarkIntentToAdd(repo); err != nil {
 			// 标记失败不致命：退化成「只统计已跟踪文件的改动」，总比什么都不记好。
+			// 也不计入 failed——它是优化项，失败了仍有可用的采集结果。
 			slog.Warn("ruel: 标记未跟踪文件失败，diff 可能缺少新增文件",
 				"repo", repo, "error", err)
 		}
@@ -79,7 +117,12 @@ func collectRuelArtifacts(workDir string) []ruelArtifactPayload {
 		for _, spec := range specs {
 			content, err := ruelGitOutput(repo, spec.args...)
 			if err != nil {
-				// git 失败（不是 git 仓库、二进制缺失）不该让任务失败，跳过即可。
+				// git 失败（二进制缺失、权限、超时）不该让任务失败，但必须留下痕迹：
+				// 「跑不出来」和「跑出来是空的」是两回事，前者是缺陷。
+				failed++
+				if firstErr == "" {
+					firstErr = fmt.Sprintf("%s: %v", spec.kind, err)
+				}
 				continue
 			}
 			if strings.TrimSpace(content) == "" {
@@ -98,7 +141,24 @@ func collectRuelArtifacts(workDir string) []ruelArtifactPayload {
 			})
 		}
 	}
-	return out
+
+	switch {
+	case len(out) > 0:
+		// 部分维度失败但采到了东西：产物仍然可用，缺陷降级为日志。
+		if failed > 0 {
+			slog.Warn("ruel: 部分产物采集失败，该 Run 的产物不完整",
+				"failed", failed, "first_error", firstErr)
+		}
+		return ruelArtifactCollection{Status: artifacts.StatusChanged, Items: out}
+	case failed > 0:
+		return ruelArtifactCollection{
+			Status:     artifacts.StatusCollectFailed,
+			Diagnostic: firstErr,
+		}
+	default:
+		// 命令都跑成功了，输出都是空的：这轮确实没改动，不写任何空产物记录。
+		return ruelArtifactCollection{Status: artifacts.StatusNoChange}
+	}
 }
 
 // ruelResolveGitDirs 找出真正含 .git 的目录。
@@ -198,4 +258,16 @@ func ruelGitOutput(workDir string, args ...string) (string, error) {
 // reportRuelArtifact 上报一条产物。
 func (c *Client) reportRuelArtifact(ctx context.Context, taskID string, payload ruelArtifactPayload) error {
 	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/artifacts", taskID), payload, nil, nil)
+}
+
+// reportRuelArtifactStatus 上报一次采集的结论。
+//
+// 结论要在产物之后上报，且即使这轮没有任何产物也要上报——「没有产物」与「没采集」
+// 的区分全靠这一条。它失败时同样只记日志：完成状态已经落地，不该为了结论回滚终态。
+func (c *Client) reportRuelArtifactStatus(
+	ctx context.Context,
+	taskID string,
+	payload ruelArtifactStatusPayload,
+) error {
+	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/artifact-status", taskID), payload, nil, nil)
 }

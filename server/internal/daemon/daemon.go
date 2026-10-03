@@ -6412,19 +6412,28 @@ func (d *Daemon) sendTerminalTaskReport(ctx context.Context, report terminalTask
 	case terminalTaskReportComplete:
 		// Ruel: 先采集产物内容再上报完成——work_dir 可能在终态后被回收，读进内存
 		// 才不会拿到空目录。上报放在完成成功之后，失败只记日志。
-		ruelArts := collectRuelArtifacts(report.workDir)
+		ruelColl := collectRuelArtifacts(report.workDir)
 
 		err := d.client.completeTaskWithRetrySchedule(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, schedule)
 		if err != nil {
 			return err
 		}
-		for _, art := range ruelArts {
+		for _, art := range ruelColl.Items {
 			if artErr := d.client.reportRuelArtifact(ctx, report.taskID, art); artErr != nil {
 				// 完成状态已经落地，产物只是附加证据。为了它去回滚一个正确的终态
 				// 是本末倒置，这里只留痕，让缺失可被发现。
 				slog.Warn("ruel: 上报 Run 产物失败，该 Run 缺少产物证据",
 					"task_id", report.taskID, "kind", art.Kind, "error", artErr)
 			}
+		}
+		// 结论无论有没有产物都要上报：只读的 Run 与采集失败的 Run 在产物表里都是
+		// 空的，靠这一条才能分开。
+		if statusErr := d.client.reportRuelArtifactStatus(ctx, report.taskID, ruelArtifactStatusPayload{
+			Status:     ruelColl.Status,
+			Diagnostic: ruelColl.Diagnostic,
+		}); statusErr != nil {
+			slog.Warn("ruel: 上报采集结论失败，该 Run 的「无产物」原因不可知",
+				"task_id", report.taskID, "status", ruelColl.Status, "error", statusErr)
 		}
 		return nil
 	case terminalTaskReportFail:

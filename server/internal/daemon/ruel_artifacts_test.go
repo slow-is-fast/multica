@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/ruel/artifacts"
 )
 
 // 这组测试盯着一个已经踩过一次的坑：work_dir 是**容器目录**，真正的 git 仓库在它的
@@ -116,12 +118,15 @@ func TestCollectRuelArtifactsOnContainerLayout(t *testing.T) {
 	}
 
 	got := collectRuelArtifacts(workDir)
-	if len(got) == 0 {
+	if len(got.Items) == 0 {
 		t.Fatal("容器布局下应当采到产物，实际为空——ruelResolveGitDirs 没定位到子仓库")
+	}
+	if got.Status != artifacts.StatusChanged {
+		t.Errorf("采到产物时结论应当是 changed，实际 %s", got.Status)
 	}
 
 	byKind := map[string]string{}
-	for _, p := range got {
+	for _, p := range got.Items {
 		byKind[p.Kind] = p.Content
 		if p.URI != "workdir://"+repo {
 			t.Errorf("kind=%s 的 URI 指向了错误目录：%s", p.Kind, p.URI)
@@ -164,7 +169,7 @@ func TestCollectRuelArtifactsIncludesNewFiles(t *testing.T) {
 	}
 
 	var diff, stat string
-	for _, p := range collectRuelArtifacts(repo) {
+	for _, p := range collectRuelArtifacts(repo).Items {
 		switch p.Kind {
 		case "diff":
 			diff = p.Content
@@ -218,7 +223,7 @@ func TestCollectRuelArtifactsIncludesCommittedWork(t *testing.T) {
 	testRuelGit(t, repo, git, "commit", "-q", "-m", "feat: 加个功能")
 
 	var diff string
-	for _, p := range collectRuelArtifacts(repo) {
+	for _, p := range collectRuelArtifacts(repo).Items {
 		if p.Kind == "diff" {
 			diff = p.Content
 		}
@@ -252,7 +257,7 @@ func TestCollectRuelArtifactsTruncates(t *testing.T) {
 	}
 
 	var diff string
-	for _, p := range collectRuelArtifacts(repo) {
+	for _, p := range collectRuelArtifacts(repo).Items {
 		if p.Kind == "diff" {
 			diff = p.Content
 		}
@@ -268,13 +273,85 @@ func TestCollectRuelArtifactsTruncates(t *testing.T) {
 	}
 }
 
-func TestCollectRuelArtifactsEmptyWorkDir(t *testing.T) {
-	if got := collectRuelArtifacts(""); len(got) != 0 {
-		t.Errorf("空 work_dir 应返回空，实际 %v", got)
-	}
-	if got := collectRuelArtifacts(filepath.Join(t.TempDir(), "不存在")); len(got) != 0 {
-		t.Errorf("不存在的目录应返回空，实际 %v", got)
-	}
+// TestCollectRuelArtifactsStatus 锁住「这一轮没有产物」的三种情况必须分开。
+//
+// 这是 #17 的核心。产物表为空时，界面上只有一句「变更：无」，而它底下压着三种性质
+// 完全不同的事：没碰仓库（正常的一类 Run）、碰了但没改动（正常）、采集失败（缺陷）。
+// 前两种正常、第三种是缺陷，可它们在库里长得一模一样——混在一起，缺陷就被伪装成了
+// 「这轮没干活」。
+func TestCollectRuelArtifactsStatus(t *testing.T) {
+	git := testRuelFindGit(t)
+
+	t.Run("没碰仓库：agent 只在容器目录里写了东西", func(t *testing.T) {
+		// 复刻 RUEL-7 的真实情形：容器目录里有产出，但没有 repo checkout。
+		workDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(workDir, "notes.md"), []byte("调研结论"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got := collectRuelArtifacts(workDir)
+		if got.Status != artifacts.StatusNoRepo {
+			t.Fatalf("应当是 %s，实际 %s（%s）", artifacts.StatusNoRepo, got.Status, got.Diagnostic)
+		}
+		if len(got.Items) != 0 {
+			t.Errorf("没碰仓库时不该产出任何产物，实际 %d 条", len(got.Items))
+		}
+	})
+
+	t.Run("没碰仓库：work_dir 为空或不存在", func(t *testing.T) {
+		if got := collectRuelArtifacts(""); got.Status != artifacts.StatusNoRepo {
+			t.Errorf("空 work_dir 应当是 %s，实际 %s", artifacts.StatusNoRepo, got.Status)
+		}
+		if got := collectRuelArtifacts(filepath.Join(t.TempDir(), "不存在")); got.Status != artifacts.StatusNoRepo {
+			t.Errorf("不存在的目录应当是 %s，实际 %s", artifacts.StatusNoRepo, got.Status)
+		}
+	})
+
+	t.Run("碰了但没改动：只读任务", func(t *testing.T) {
+		repo := t.TempDir()
+		testRuelGit(t, repo, git, "init", "-q")
+		testRuelGit(t, repo, git, "config", "user.email", "ruel@example.com")
+		testRuelGit(t, repo, git, "config", "user.name", "Ruel")
+		testRuelGit(t, repo, git, "config", "commit.gpgsign", "false")
+		if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("hello\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		testRuelGit(t, repo, git, "add", ".")
+		testRuelGit(t, repo, git, "commit", "-q", "-m", "baseline")
+
+		got := collectRuelArtifacts(repo)
+		if got.Status != artifacts.StatusNoChange {
+			t.Fatalf("干净仓库应当是 %s，实际 %s（%s）", artifacts.StatusNoChange, got.Status, got.Diagnostic)
+		}
+		// 判据三：只读任务不产生误导性的空产物记录。写一条 content 为空的 diff 进去，
+		// 界面上就会显示一个「变更」区块、点开是空的——那比什么都不显示更糟。
+		if len(got.Items) != 0 {
+			t.Errorf("只读任务不该写入任何产物记录，实际 %d 条：%+v", len(got.Items), got.Items)
+		}
+	})
+
+	t.Run("采集失败：仓库在，但 git 跑不出来", func(t *testing.T) {
+		// .git 是个空目录：定位阶段能找到它（.git 存在），但任何 git 命令都会失败。
+		// 这正对应 git 二进制缺失 / 权限问题 / 仓库损坏那类缺陷。
+		workDir := t.TempDir()
+		repo := filepath.Join(workDir, "broken")
+		if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, "src.txt"), []byte("改过了\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		got := collectRuelArtifacts(workDir)
+		if got.Status != artifacts.StatusCollectFailed {
+			t.Fatalf("应当是 %s，实际 %s", artifacts.StatusCollectFailed, got.Status)
+		}
+		if got.Diagnostic == "" {
+			t.Error("采集失败要带上诊断信息，否则只知道失败、无从排查")
+		}
+		if len(got.Items) != 0 {
+			t.Errorf("采集失败时不该有产物，实际 %d 条", len(got.Items))
+		}
+	})
 }
 
 func testRuelFindGit(t *testing.T) string {

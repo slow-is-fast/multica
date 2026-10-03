@@ -28,8 +28,19 @@ type RuelArtifactRequest struct {
 	URI     string `json:"uri"`
 }
 
+// RuelArtifactStatusRequest 是 daemon 上报采集结论的请求体。
+//
+// 结论与产物分开上报：产物回答「这轮改了什么」，结论回答「这轮为什么没有产物」。
+// 后者在没有产物时也要上报，否则「只读的 Run」和「采集失败的 Run」在库里长得一样。
+type RuelArtifactStatusRequest struct {
+	Status     string `json:"status"`
+	Diagnostic string `json:"diagnostic"`
+}
+
 // RuelArtifactResponse 是读取产物的响应体。content 可能很长（diff 全文），由调用方
 // 决定是否截断；checksum 始终返回，便于核对截断后的内容是否被改过。
+//
+// kind=collection_status 的记录是采集结论而非产物，读取方要按 kind 分流。
 type RuelArtifactResponse struct {
 	ID        string `json:"id"`
 	TaskID    string `json:"task_id"`
@@ -82,7 +93,9 @@ func (h *Handler) UpsertRuelArtifact(w http.ResponseWriter, r *http.Request) {
 	if req.Content == "" {
 		// 空产物不是「没有改动」，就是没采集到。这两者必须分开：前者是合法结果，
 		// 后者是缺陷。静默写入空产物，会让 Issue 页上的「变更：无」变得无法判断。
-		writeError(w, http.StatusBadRequest, "content is required; report absence explicitly instead")
+		//
+		// 「没有改动」不写产物，写结论——走下面的 UpsertRuelArtifactStatus。
+		writeError(w, http.StatusBadRequest, "content is required; report absence via artifact-status instead")
 		return
 	}
 
@@ -95,6 +108,43 @@ func (h *Handler) UpsertRuelArtifact(w http.ResponseWriter, r *http.Request) {
 		URI:         req.URI,
 		Checksum:    artifacts.Sum(req.Content),
 		Content:     req.Content,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// UpsertRuelArtifactStatus 由 daemon 在 Run 结束后调用，写入这次采集的结论。
+//
+// 结论值必须落在已知集合里。放任意字符串等于把「这轮为什么没有产物」变成一个前端
+// 读不懂的词，界面上只能显示空白——那跟没有结论一样，缺陷又被藏起来了。
+func (h *Handler) UpsertRuelArtifactStatus(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+
+	task, workspaceID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
+	if !ok {
+		return
+	}
+
+	var req RuelArtifactStatusRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !artifacts.ValidStatus(req.Status) {
+		writeError(w, http.StatusBadRequest, "unknown collection status")
+		return
+	}
+
+	store := artifacts.NewStore(h.DB)
+	err := store.UpsertStatus(r.Context(), artifacts.Artifact{
+		WorkspaceID: parseUUID(workspaceID),
+		TaskID:      parseUUID(taskID),
+		IssueID:     task.IssueID,
+		Content:     req.Status,
+		URI:         req.Diagnostic,
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
