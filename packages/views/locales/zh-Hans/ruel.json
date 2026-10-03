@@ -1,0 +1,26 @@
+{
+  "artifacts": {
+    "section_title": "变更",
+    "run_title": "本次 Run 的变更",
+    "toggle_aria": "展开或收起变更",
+    "files_other": "{{count}} 个文件",
+    "lines": "+{{added}} / -{{removed}}",
+    "lines_only": "改动 {{count}} 行",
+    "kind_add": "新增",
+    "kind_delete": "删除",
+    "kind_modify": "修改",
+    "kind_rename": "重命名",
+    "renamed_to": "{{from}} → {{to}}",
+    "truncated_notice": "diff 超过 1 MiB 已截断，完整 diff 请到该 Run 的工作目录查看。",
+    "empty_run": "这一轮 Run 没有记录到文件变更。",
+    "empty_issue": "还没有采集到变更。",
+    "not_collected": "未采集",
+    "checksum_title": "sha256：{{sum}}",
+    "round": "第 {{index}} 轮"
+  },
+  "attribution": {
+    "built_on": "基于 Multica 构建",
+    "license": "许可证",
+    "notice": "声明"
+  }
+}

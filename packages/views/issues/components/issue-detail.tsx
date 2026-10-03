@@ -115,6 +115,7 @@ import { PluginPanelSection } from "../../plugins";
 import { PullRequestsSection } from "./pull-requests-section";
 import { useGitHubSettings } from "@multica/core/github";
 import { DeliverablesSection } from "./deliverables/deliverables-section";
+import { IssueArtifactsSection } from "../../ruel/artifacts/issue-artifacts-section";
 import { DeliverablesOverview } from "./deliverables/deliverables-overview";
 import {
   DESCRIPTION_BLOCK_ID,
@@ -2935,6 +2936,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {/* Deliverables — the files this issue's comments delivered. Hidden
           while there are none. */}
       <DeliverablesSection files={deliverableFiles} onOpenOverview={openOverview} />
+
+      {/* Changes — 这个需求下每一轮 Run 各自改了什么，逐轮列出而不是合并成净额。
+          放在交付物下面、执行日志上面：它和执行日志讲的是同一批 Run，只是维度不同
+          （一个讲改了什么，一个讲花了多少），挨着放才对得上。 */}
+      <IssueArtifactsSection issueId={id} />
 
       {/* Execution log — active runs + collapsed past runs, each carrying its
           own token spend, with the issue total on the section header.

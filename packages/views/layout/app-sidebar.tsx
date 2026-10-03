@@ -8,6 +8,7 @@ import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { AppLink, useNavigation } from "../navigation";
 import { HelpLauncher } from "./help-launcher";
 import { JoinDiscordCard } from "./join-discord-card";
+import { RuelAttribution } from "../ruel/attribution";
 import {
   DndContext,
   PointerSensor,
@@ -933,6 +934,9 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <JoinDiscordCard />
             <HelpLauncher />
           </div>
+          {/* 复用上游前端的署名义务：常驻在侧栏底部，不随页面切换消失。
+              Multica License Part I 1(b) 禁止删除界面上的署名信息。 */}
+          <RuelAttribution />
         </SidebarFooter>
         <SidebarRail />
       </Sidebar>

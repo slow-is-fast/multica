@@ -13,6 +13,13 @@ import { AgentTranscriptDialog } from "./agent-transcript-dialog";
 import type { TimelineItem } from "./build-timeline";
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace" }));
+// Ruel 新增：弹层里挂了 Run 产物面板，它自己发查询取数据。这个文件的断言对象是一次
+// Run 的时间线，不是产物；把它换成空，既不需要 QueryClient，也不会引入 react-query
+// 的定时器（那会让「卸载后不应有残留 timer」这条断言失败）。产物的渲染与解析由
+// ruel/artifacts 下的用例单独覆盖。
+vi.mock("../../ruel/artifacts/run-artifacts", () => ({
+  RunArtifactsPanel: () => null,
+}));
 vi.mock("./use-trace-issue-labels", () => ({
   useTraceIssueLabels: () => (text: string) => text.replaceAll("01a07eca-8e82-775e-be06-e4a97ccfa299", "DEV-17"),
 }));

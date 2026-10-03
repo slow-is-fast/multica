@@ -43,6 +43,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
 import { AttributionBadge } from "../../issues/components/attribution-badge";
+import { RunArtifactsPanel } from "../../ruel/artifacts/run-artifacts";
 import { plainTriggerSummary } from "../../issues/components/task-run-labels";
 import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { RichContent } from "../../rich-content";
@@ -1090,6 +1091,12 @@ export function AgentTranscriptDialog({
 
         {/* ── What the run produced ──────────────────────────────────── */}
         <RunOutcomeRow outcome={outcome} branch={task.branch_name} />
+
+        {/* ── What this run changed ────────────────────────────────────
+            产物接在「产出」那一行后面：这一行说的是结果（成功/失败、分支），紧接着
+            回答「那它到底改了什么」。默认收起——时间线才是这个弹层的主体，一打开就
+            被 diff 占满会把它挤掉。 */}
+        <RunArtifactsPanel issueId={task.issue_id} taskId={task.id} />
 
         {/* ── Where the time went ────────────────────────────────────── */}
         {lanes && (

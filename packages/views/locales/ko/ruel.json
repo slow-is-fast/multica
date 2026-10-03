@@ -1,0 +1,26 @@
+{
+  "artifacts": {
+    "section_title": "Changes",
+    "run_title": "Changes in this run",
+    "toggle_aria": "Toggle changes",
+    "files_other": "{{count}} files",
+    "lines": "+{{added}} / -{{removed}}",
+    "lines_only": "{{count}} lines changed",
+    "kind_add": "Added",
+    "kind_delete": "Deleted",
+    "kind_modify": "Modified",
+    "kind_rename": "Renamed",
+    "renamed_to": "{{from}} → {{to}}",
+    "truncated_notice": "Diff truncated at 1 MiB — the full diff is in this run's worktree.",
+    "empty_run": "This run reported no file changes.",
+    "empty_issue": "No changes collected yet.",
+    "not_collected": "Not collected",
+    "checksum_title": "sha256: {{sum}}",
+    "round": "Run {{index}}"
+  },
+  "attribution": {
+    "built_on": "Built on Multica",
+    "license": "License",
+    "notice": "Notices"
+  }
+}
