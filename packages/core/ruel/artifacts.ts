@@ -23,6 +23,80 @@ export const RUEL_ARTIFACT_KINDS = [
 
 export type RuelArtifactKind = (typeof RUEL_ARTIFACT_KINDS)[number];
 
+/**
+ * 采集结论的 kind。它不是产物——产物回答「这轮改了什么」，结论回答「这轮为什么没有
+ * 产物」。刻意不并进 RUEL_ARTIFACT_KINDS：那是产物种类的白名单，混进去会让
+ * artifactOfKind 之类的调用把结论也当成一种产物取出来。
+ */
+export const RUEL_COLLECTION_STATUS_KIND = "collection_status";
+
+/**
+ * 一次采集的结论。
+ *
+ * 四种取值对应「产物表为空」的四种含义，缺了这一层它们长得一模一样：
+ *
+ * - `changed`：采到了。这一轮有产物，不需要解释。
+ * - `no_repo`：这轮没碰代码仓库（agent 只在容器目录里活动）。正常。
+ * - `no_change`：碰了仓库但确实没改动（只读任务 / 改动被 revert）。正常。
+ * - `collect_failed`：git 缺失、超时、权限问题。**这是缺陷**，不是「没干活」。
+ *
+ * 另外还有一种界面状态叫「压根没采集」——连结论都没有，说明 daemon 没上报成功。
+ * 它由结论缺失来表达，不单列一个值。
+ */
+export const RUEL_COLLECTION_STATUSES = [
+  "changed",
+  "no_repo",
+  "no_change",
+  "collect_failed",
+] as const;
+
+export type RuelCollectionStatus = (typeof RUEL_COLLECTION_STATUSES)[number];
+
+function isRuelCollectionStatus(value: string): value is RuelCollectionStatus {
+  return (RUEL_COLLECTION_STATUSES as readonly string[]).includes(value);
+}
+
+/** 这一行是不是采集结论（而不是产物）。 */
+export function isCollectionStatus(artifact: RuelArtifact): boolean {
+  return artifact.kind === RUEL_COLLECTION_STATUS_KIND;
+}
+
+/**
+ * 取一次 Run 的采集结论。认不出的取值一律当「没有结论」——结论是解释性文本，
+ * 认不出就退回「不知道」，也不能让一个拼错的词把界面卡住。
+ */
+export function collectionStatusOf(
+  artifacts: readonly RuelArtifact[] | undefined,
+): RuelCollectionStatus | undefined {
+  const row = artifacts?.find(isCollectionStatus);
+  if (!row) return undefined;
+  return isRuelCollectionStatus(row.content) ? row.content : undefined;
+}
+
+/**
+ * 把产物与结论分开。
+ *
+ * 服务端为省一次查询，把结论作为 kind=collection_status 的一行混在列表里返回；这里
+ * 在客户端分流，调用方拿到的 items 就只会是真正的产物。
+ */
+export function splitRuelArtifacts(artifacts: readonly RuelArtifact[]): {
+  items: RuelArtifact[];
+  statusByTask: Map<string, RuelCollectionStatus>;
+} {
+  const items: RuelArtifact[] = [];
+  const statusByTask = new Map<string, RuelCollectionStatus>();
+  for (const artifact of artifacts) {
+    if (isCollectionStatus(artifact)) {
+      if (isRuelCollectionStatus(artifact.content)) {
+        statusByTask.set(artifact.task_id, artifact.content);
+      }
+      continue;
+    }
+    items.push(artifact);
+  }
+  return { items, statusByTask };
+}
+
 export interface RuelArtifact {
   id: string;
   task_id: string;
