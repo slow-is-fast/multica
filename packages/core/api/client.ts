@@ -2,6 +2,10 @@ import type { ZodType } from "zod";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
 import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema } from "./schemas";
+// Ruel 新增：Run 产物（P0-6 的 diff 与文件变更证据）。服务端接口见
+// server/internal/handler/ruel_artifacts.go，类型与降级策略见 ../ruel/artifacts。
+import { RuelArtifactListSchema } from "../ruel/artifacts";
+import type { RuelArtifact } from "../ruel/artifacts";
 import type { InboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import { configStore } from "../config";
@@ -2804,6 +2808,23 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/issues/${issueId}/task-runs`);
     return parseWithFallback<AgentTask[]>(raw, AgentTaskListSchema, [], {
       endpoint: "GET /api/issues/:id/task-runs",
+    });
+  }
+
+  /**
+   * Ruel 新增：某个 Issue 下所有 Run 的产物（diff / diff_stat / file_change）。
+   *
+   * 用 Issue 而不是 Run 作为维度，是因为验收看的是「这个需求总共改了什么」——多轮
+   * Run 的变更要能一起看到，只看最后一轮会漏掉被 revert 又重做的部分。Run 详情页
+   * 要的「这一轮改了什么」由客户端按 task_id 过滤同一份数据得到，不另发请求。
+   *
+   * 这里是人侧读取（loadIssueForUser 鉴权）；daemon 侧那组按 Run 读写的接口用的是
+   * task token，前端调用不到，也不该调用到。
+   */
+  async listRuelIssueArtifacts(issueId: string): Promise<RuelArtifact[]> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/artifacts`);
+    return parseWithFallback<RuelArtifact[]>(raw, RuelArtifactListSchema, [], {
+      endpoint: "GET /api/issues/:id/artifacts",
     });
   }
 
