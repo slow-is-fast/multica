@@ -15,6 +15,9 @@
     "empty_run": "This run reported no file changes.",
     "empty_issue": "No changes collected yet.",
     "not_collected": "Not collected",
+    "reason_no_repo": "No repository was checked out in this run",
+    "reason_no_change": "This run read the code but changed nothing",
+    "reason_collect_failed": "Collection failed — no artifact evidence for this run",
     "checksum_title": "sha256: {{sum}}",
     "round": "Run {{index}}"
   },

@@ -17,10 +17,13 @@ import { issueArtifactsOptions } from "@multica/core/ruel/queries";
 import {
   artifactOfKind,
   groupArtifactsByTask,
+  splitRuelArtifacts,
   type RuelArtifact,
+  type RuelCollectionStatus,
 } from "@multica/core/ruel/artifacts";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
+import { EmptyReason } from "./collection-status";
 import {
   countDiffLines,
   parseDiffStat,
@@ -33,6 +36,8 @@ interface RunChanges {
   taskId: string;
   /** 第几轮，从 1 开始，按产物产生的时间正序编号。 */
   index: number;
+  /** 这一轮的采集结论。没有产物的轮次靠它说明原因，而不是留一片空白。 */
+  status: RuelCollectionStatus | undefined;
   changes: FileChange[];
   added: number;
   removed: number;
@@ -104,6 +109,19 @@ function RunRow({ run }: { run: RunChanges }) {
   const { t } = useT("ruel");
   const [expanded, setExpanded] = useState(false);
 
+  // 没有改动的轮次不做成可展开的行：点开只会看到一句「没有变更」，那句话直接写在行里
+  // 更好——少一次点击，也少一个空区块。
+  if (run.changes.length === 0) {
+    return (
+      <div className="flex w-full items-center gap-1.5 px-1 py-1 text-caption">
+        <span className="shrink-0 text-micro text-muted-foreground">
+          {t(($) => $.artifacts.round, { index: run.index })}
+        </span>
+        <EmptyReason status={run.status} className="truncate text-micro" />
+      </div>
+    );
+  }
+
   return (
     <div>
       <button
@@ -115,11 +133,9 @@ function RunRow({ run }: { run: RunChanges }) {
         <span className="shrink-0 text-micro text-muted-foreground">
           {t(($) => $.artifacts.round, { index: run.index })}
         </span>
-        {run.changes.length > 0 && (
-          <span className="shrink-0 text-micro text-muted-foreground">
-            {t(($) => $.artifacts.files, { count: run.changes.length })}
-          </span>
-        )}
+        <span className="shrink-0 text-micro text-muted-foreground">
+          {t(($) => $.artifacts.files, { count: run.changes.length })}
+        </span>
         <span className="ml-auto shrink-0 font-mono text-micro tabular-nums">
           {run.added > 0 && <span className="text-success">+{run.added}</span>}
           {run.removed > 0 && <span className="text-destructive">-{run.removed}</span>}
@@ -127,21 +143,15 @@ function RunRow({ run }: { run: RunChanges }) {
       </button>
       {expanded && (
         <ul className="space-y-0.5 pb-1 pl-3">
-          {run.changes.length === 0 ? (
-            <li className="text-micro text-muted-foreground">
-              {t(($) => $.artifacts.empty_run)}
+          {run.changes.map((change) => (
+            <li
+              key={`${change.kind}:${change.path}`}
+              className="truncate font-mono text-micro text-muted-foreground"
+              title={change.fromPath ? `${change.fromPath} → ${change.path}` : change.path}
+            >
+              {change.path}
             </li>
-          ) : (
-            run.changes.map((change) => (
-              <li
-                key={`${change.kind}:${change.path}`}
-                className="truncate font-mono text-micro text-muted-foreground"
-                title={change.fromPath ? `${change.fromPath} → ${change.path}` : change.path}
-              >
-                {change.path}
-              </li>
-            ))
-          )}
+          ))}
         </ul>
       )}
     </div>
@@ -152,16 +162,31 @@ function RunRow({ run }: { run: RunChanges }) {
  * 把产物按 Run 分组并编号。
  *
  * 服务端按 created_at 排序返回，所以这里按首次出现的顺序编号就是时间正序。
+ *
+ * 顺序取自**未分流**的列表：只有结论没有产物的那一轮（只读、没检出仓库、采集失败）在
+ * items 里不留痕迹，只看 items 就会把它漏掉，而它同样占一个轮次编号。
  */
 function buildRuns(artifacts: readonly RuelArtifact[]): RunChanges[] {
-  const grouped = groupArtifactsByTask(artifacts);
+  const { items, statusByTask } = splitRuelArtifacts(artifacts);
+  const grouped = groupArtifactsByTask(items);
+
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  for (const artifact of artifacts) {
+    if (seen.has(artifact.task_id)) continue;
+    seen.add(artifact.task_id);
+    ordered.push(artifact.task_id);
+  }
+
   const runs: RunChanges[] = [];
   let index = 0;
-  for (const [taskId, list] of grouped) {
+  for (const taskId of ordered) {
+    const list = grouped.get(taskId) ?? [];
     index += 1;
     runs.push({
       taskId,
       index,
+      status: statusByTask.get(taskId),
       changes: parseFileChanges(artifactOfKind(list, "file_change")?.content ?? ""),
       // 有 --stat 就用它算：它是纯文本表格，比把整份 diff 解析一遍便宜得多。没有
       // （比如采集时 git 没输出）才退回解析 diff 正文。

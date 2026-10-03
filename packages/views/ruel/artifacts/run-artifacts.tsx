@@ -13,10 +13,15 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, FileDiff } from "lucide-react";
 import { issueArtifactsOptions } from "@multica/core/ruel/queries";
-import { artifactOfKind } from "@multica/core/ruel/artifacts";
+import {
+  artifactOfKind,
+  collectionStatusOf,
+  isCollectionStatus,
+} from "@multica/core/ruel/artifacts";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import { DiffDetailSurface } from "../../common/task-transcript/detail-surfaces";
+import { EmptyReason } from "./collection-status";
 import {
   countDiffLines,
   isTruncated,
@@ -39,9 +44,9 @@ export interface RunArtifactsPanelProps {
 /**
  * 一次 Run 改了什么。
  *
- * 没有产物时整块不渲染——与上游 DeliverablesSection 一个道理：一个没有内容可展示的
- * 区块只会占地方。「没动仓库 / 没产生改动 / 采集失败」这三种空的区分是 #17 的事，
- * 那里定完了这里跟着显示对应的那句。
+ * 没有产物时不再一律整块不渲染，而是先看有没有采集结论：有结论就显示「这一轮为什么
+ * 没有产物」（没检出仓库 / 没改动 / 采集失败），连结论都没有才整块不渲染——那种情况
+ * 意味着这轮压根没采集过，给它一个「变更：无」的区块反而是在把未知伪装成已知。
  */
 export function RunArtifactsPanel({
   issueId,
@@ -56,28 +61,44 @@ export function RunArtifactsPanel({
     () => artifacts.filter((artifact) => artifact.task_id === taskId),
     [artifacts, taskId],
   );
+  // 结论行（kind=collection_status）不是产物，分流出去，否则「有产物」的判断会被它
+  // 带偏：一个只有结论行的 Run 会被当成有产物，展开后是一块空的变更列表。
+  const items = useMemo(() => mine.filter((artifact) => !isCollectionStatus(artifact)), [mine]);
+  const status = useMemo(() => collectionStatusOf(mine), [mine]);
 
   const changes = useMemo(
-    () => parseFileChanges(artifactOfKind(mine, "file_change")?.content ?? ""),
-    [mine],
+    () => parseFileChanges(artifactOfKind(items, "file_change")?.content ?? ""),
+    [items],
   );
   const statEntries = useMemo(
-    () => parseDiffStat(artifactOfKind(mine, "diff_stat")?.content ?? ""),
-    [mine],
+    () => parseDiffStat(artifactOfKind(items, "diff_stat")?.content ?? ""),
+    [items],
   );
   const diffFiles = useMemo(
-    () => parseUnifiedDiff(artifactOfKind(mine, "diff")?.content ?? ""),
-    [mine],
+    () => parseUnifiedDiff(artifactOfKind(items, "diff")?.content ?? ""),
+    [items],
   );
   const truncated = useMemo(
-    () => isTruncated(artifactOfKind(mine, "diff")?.content ?? ""),
-    [mine],
+    () => isTruncated(artifactOfKind(items, "diff")?.content ?? ""),
+    [items],
   );
 
-  if (mine.length === 0) return null;
-
   const { added, removed } = countDiffLines(diffFiles);
-  const checksum = artifactOfKind(mine, "diff")?.checksum ?? "";
+  const checksum = artifactOfKind(items, "diff")?.checksum ?? "";
+
+  // 没有产物但有结论：显示这一轮为什么没有产物。没有结论才整块不渲染。
+  if (items.length === 0) {
+    if (!status) return null;
+    return (
+      <div className="shrink-0 border-b px-4 py-2">
+        <div className="flex w-full items-center gap-1.5 px-1 py-1 text-caption">
+          <FileDiff className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate">{t(($) => $.artifacts.run_title)}</span>
+          <EmptyReason status={status} className="ml-auto shrink-0 truncate text-micro" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="shrink-0 border-b px-4 py-2">

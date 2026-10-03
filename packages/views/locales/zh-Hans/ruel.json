@@ -15,6 +15,9 @@
     "empty_run": "这一轮 Run 没有记录到文件变更。",
     "empty_issue": "还没有采集到变更。",
     "not_collected": "未采集",
+    "reason_no_repo": "这一轮没有检出代码仓库",
+    "reason_no_change": "这一轮看完了代码，没有改动",
+    "reason_collect_failed": "采集失败，这一轮没有产物证据",
     "checksum_title": "sha256：{{sum}}",
     "round": "第 {{index}} 轮"
   },

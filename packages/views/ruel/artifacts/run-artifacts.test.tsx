@@ -110,3 +110,81 @@ describe("IssueArtifactsSection", () => {
     expect(container.textContent).toBe("");
   });
 });
+
+// 只有结论、没有产物的轮次。真实形状见 server/internal/daemon/ruel_artifacts.go：
+// 采集结束时除了产物还要写一行 kind=collection_status，说明「这一轮为什么没有产物」。
+const STATUS_ROWS: RuelArtifact[] = [
+  // 第 3 轮：碰了仓库，但确实没改动（只读任务）
+  artifact({
+    task_id: "task-3",
+    kind: "collection_status",
+    content: "no_change",
+    created_at: "2026-10-02T04:00:00Z",
+  }),
+  // 第 4 轮：采集失败——这是缺陷，不是没干活
+  artifact({
+    task_id: "task-4",
+    kind: "collection_status",
+    content: "collect_failed",
+    created_at: "2026-10-02T05:00:00Z",
+  }),
+  // 第 5 轮：压根没检出仓库
+  artifact({
+    task_id: "task-5",
+    kind: "collection_status",
+    content: "no_repo",
+    created_at: "2026-10-02T06:00:00Z",
+  }),
+];
+
+const WITH_STATUS = [...ARTIFACTS, ...STATUS_ROWS];
+
+describe("没有产物的三种情况", () => {
+  it("只读的 Run 说明「没改动」，而不是留一块空", () => {
+    renderWithArtifacts(<RunArtifactsPanel issueId="issue-1" taskId="task-3" />, WITH_STATUS);
+    expect(screen.getByText("这一轮看完了代码，没有改动")).toBeInTheDocument();
+  });
+
+  it("采集失败要说出来——它是缺陷，不是「这轮没干活」", () => {
+    renderWithArtifacts(<RunArtifactsPanel issueId="issue-1" taskId="task-4" />, WITH_STATUS);
+    expect(screen.getByText("采集失败，这一轮没有产物证据")).toBeInTheDocument();
+  });
+
+  it("没检出仓库与没改动是两句话，不能都归成「无」", () => {
+    renderWithArtifacts(<RunArtifactsPanel issueId="issue-1" taskId="task-5" />, WITH_STATUS);
+    expect(screen.getByText("这一轮没有检出代码仓库")).toBeInTheDocument();
+  });
+
+  it("连结论都没有时不渲染——那表示这轮压根没采集过，不该伪装成「没改动」", () => {
+    const { container } = renderWithArtifacts(
+      <RunArtifactsPanel issueId="issue-1" taskId="task-none" />,
+      WITH_STATUS,
+    );
+    expect(container.textContent).toBe("");
+  });
+
+  it("有产物的轮次不受结论行干扰，diff 照常展示", () => {
+    renderWithArtifacts(<RunArtifactsPanel issueId="issue-1" taskId="task-1" />, WITH_STATUS);
+    expect(screen.getByText("1 个文件")).toBeInTheDocument();
+    expect(screen.getByText("+1")).toBeInTheDocument();
+  });
+});
+
+describe("IssueArtifactsSection 里的空轮次", () => {
+  it("只写了结论的轮次也要占一个轮次编号", () => {
+    renderWithArtifacts(<IssueArtifactsSection issueId="issue-1" />, WITH_STATUS);
+    expect(screen.getByText("第 3 轮")).toBeInTheDocument();
+    expect(screen.getByText("第 4 轮")).toBeInTheDocument();
+  });
+
+  it("每一轮各自说明自己为什么没有产物", () => {
+    renderWithArtifacts(<IssueArtifactsSection issueId="issue-1" />, WITH_STATUS);
+    expect(screen.getByText("这一轮看完了代码，没有改动")).toBeInTheDocument();
+    expect(screen.getByText("采集失败，这一轮没有产物证据")).toBeInTheDocument();
+  });
+
+  it("空轮次不贡献累计文件数", () => {
+    renderWithArtifacts(<IssueArtifactsSection issueId="issue-1" />, WITH_STATUS);
+    expect(screen.getAllByText("1 个文件")).toHaveLength(3);
+  });
+});
