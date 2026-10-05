@@ -729,7 +729,9 @@ func TestGcWorkspace_CleansEmptyWorkspaceDir(t *testing.T) {
 		CompletedAt: time.Now(),
 	})
 
-	d.gcWorkspace(context.Background(), wsDir, &gcStats{byPattern: map[string]int{}})
+	// 走 runGC 而不是直接调 gcWorkspace：清空后连工作区目录一起删掉这一步现在属于
+	// runGC，因为 gcWorkspace 已经被清理预览（PlanGC）共用，而预览绝不能删东西。
+	d.runGC(context.Background())
 
 	if _, err := os.Stat(wsDir); !os.IsNotExist(err) {
 		t.Fatal("empty workspace dir should be removed after all tasks cleaned")
@@ -779,7 +781,7 @@ func TestGCWorkspace_BatchesAndDeduplicatesIssueChecks(t *testing.T) {
 	})
 
 	stats := &gcStats{byPattern: map[string]int{}}
-	d.gcWorkspace(context.Background(), wsDir, stats)
+	d.gcWorkspace(context.Background(), wsDir, stats, d.realGCApply(stats))
 
 	if batchRequests != 1 || legacyRequests != 0 {
 		t.Fatalf("requests: batch=%d legacy=%d, want batch=1 legacy=0", batchRequests, legacyRequests)
@@ -821,7 +823,7 @@ func TestGCWorkspace_CompletedTaskTTLRemovesOpenIssue(t *testing.T) {
 	writeFile(t, filepath.Join(taskDir, "workdir", "checkout.bin"), 128)
 
 	stats := &gcStats{byPattern: map[string]int{}}
-	d.gcWorkspace(context.Background(), wsDir, stats)
+	d.gcWorkspace(context.Background(), wsDir, stats, d.realGCApply(stats))
 
 	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
 		t.Fatalf("completed open-issue task dir should be removed, stat error = %v", err)
@@ -857,7 +859,8 @@ func TestGCWorkspace_OldServerFallbackIsCached(t *testing.T) {
 		taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, tc.workspace, fmt.Sprintf("task-%d", i), &execenv.GCMeta{
 			IssueID: tc.issueID, WorkspaceID: tc.workspace, CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
 		})
-		d.gcWorkspace(context.Background(), wsDir, &gcStats{byPattern: map[string]int{}})
+		stats := &gcStats{byPattern: map[string]int{}}
+	d.gcWorkspace(context.Background(), wsDir, stats, d.realGCApply(stats))
 		if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
 			t.Fatalf("legacy fallback did not clean %s", taskDir)
 		}
@@ -894,7 +897,7 @@ func TestGCWorkspace_BatchFailureDoesNotFanOutOrClean(t *testing.T) {
 		IssueID: issueID, WorkspaceID: "ws-fail", CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
 	})
 	stats := &gcStats{byPattern: map[string]int{}}
-	d.gcWorkspace(context.Background(), wsDir, stats)
+	d.gcWorkspace(context.Background(), wsDir, stats, d.realGCApply(stats))
 
 	if batchRequests != 1 || legacyRequests != 0 {
 		t.Fatalf("requests: batch=%d legacy=%d, want batch=1 legacy=0", batchRequests, legacyRequests)
@@ -946,7 +949,7 @@ func TestGCWorkspace_ReclaimsLegacyCodexSandboxWithoutConfiguredPatterns(t *test
 	}
 
 	stats := &gcStats{byPattern: map[string]int{}}
-	d.gcWorkspace(context.Background(), wsDir, stats)
+	d.gcWorkspace(context.Background(), wsDir, stats, d.realGCApply(stats))
 
 	if _, err := os.Stat(filepath.Join(taskDir, "codex-home/.sandbox-bin")); !os.IsNotExist(err) {
 		t.Fatalf("managed Codex sandbox should be removed, stat err=%v", err)

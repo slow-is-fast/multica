@@ -391,7 +391,7 @@ func TestManagedArtifact_UnreachableIssueStillReclaimsCache(t *testing.T) {
 	writeFile(t, filepath.Join(taskDir, "output/result.md"), 32)
 
 	stats := &gcStats{byPattern: map[string]int{}}
-	d.gcWorkspaceIssues(context.Background(), "ws", []issueGCCandidate{{taskDir: taskDir, meta: meta}}, stats)
+	d.gcWorkspaceIssues(context.Background(), "ws", []issueGCCandidate{{taskDir: taskDir, meta: meta}}, stats, d.realGCApply(stats))
 
 	assertGone(t, taskDir, sandboxBinRel)
 	assertKept(t, taskDir, "output/result.md", ".gc_meta.json")

@@ -410,6 +410,10 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
 	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
+	// Ruel 新增：清理预览（P0-9）。放在 daemon 自己的进程里而不是 CLI 侧计算，是
+	// 因为决策要用 daemon 的内存状态（哪些目录正在跑）与服务端查询——CLI 另算一套
+	// 会与真实 GC 分叉。实现见 gcplan.go。
+	mux.HandleFunc("/gc-plan", d.gcPlanHandler())
 
 	srv := &http.Server{Handler: mux}
 
@@ -422,6 +426,33 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		d.logger.Warn("health server error", "error", err)
 	}
+}
+
+// gcPlanHandler 应答清理预览。只允许 GET——预览按定义是只读的，把这个方法暴露成
+// 可写的是一个不该存在的风险面。
+func (d *Daemon) gcPlanHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			writeGCError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		report, err := d.PlanGC(r.Context())
+		if err != nil {
+			writeGCError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(report); err != nil {
+			d.logger.Warn("gc-plan: write response failed", "error", err)
+		}
+	}
+}
+
+func writeGCError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }
 
 func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {

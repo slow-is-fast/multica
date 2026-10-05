@@ -106,7 +106,15 @@ func (d *Daemon) runGC(ctx context.Context) {
 			continue
 		}
 		wsDir := filepath.Join(root, wsEntry.Name())
-		d.gcWorkspace(ctx, wsDir, stats)
+		cleaned := d.gcWorkspace(ctx, wsDir, stats, d.realGCApply(stats))
+		// 目录空了就顺手删掉工作区目录本身。这一步只有真实 GC 做——预览不该删任何
+		// 东西，所以它拿到 cleaned 也不做任何事。
+		if cleaned > 0 {
+			remaining, _ := os.ReadDir(wsDir)
+			if len(remaining) == 0 {
+				os.Remove(wsDir)
+			}
+		}
 	}
 
 	// Stable-root records are published before the physical env root so a
@@ -193,26 +201,41 @@ func (d *Daemon) runGC(ctx context.Context) {
 	}
 }
 
-// gcWorkspace scans task directories inside a single workspace directory.
-func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string, stats *gcStats) {
+// gcWorkspace scans task directories inside a single workspace directory and
+// hands every decision to apply.
+//
+// 真实 GC 与清理预览（gcplan.go 的 PlanGC）共用这一趟遍历，只有 apply 不同：一个
+// 执行删除，一个只记录。这是刻意的——预览若另走一条路，两处的判断迟早会分叉，而
+// **会撒谎的预览比没有预览更糟**：用户照着它判断「这个目录会不会被删」，得到的却是
+// 另一套逻辑的结论。
+//
+// 返回被清理的目录数；是否顺手删掉空的工作区目录由调用方决定（预览不该删任何东西）。
+func (d *Daemon) gcWorkspace(
+	ctx context.Context,
+	wsDir string,
+	stats *gcStats,
+	apply func(taskDir string, meta *execenv.GCMeta, dec gcDecision) int,
+) int {
 	taskEntries, err := os.ReadDir(wsDir)
 	if err != nil {
 		d.logger.Warn("gc: read workspace dir failed", "dir", wsDir, "error", err)
-		return
+		return 0
 	}
 
 	cleanedHere := 0
 	issueCandidatesByWorkspace := make(map[string][]issueGCCandidate)
 	for _, entry := range taskEntries {
 		if ctx.Err() != nil {
-			return
+			return cleanedHere
 		}
 		if !entry.IsDir() {
 			continue
 		}
 		taskDir := filepath.Join(wsDir, entry.Name())
 		if d.isActiveEnvRoot(taskDir) {
-			stats.skipped++
+			// 正在跑的目录交给 apply 而不是直接跳过：真实 GC 记为 skipped，预览则可以
+			// 把它列成「正在运行，本轮不会动」——这正是用户需要知道的那一条。
+			cleanedHere += apply(taskDir, nil, gcDecision{action: gcActionSkip, active: true})
 			continue
 		}
 		meta, metaErr := execenv.ReadGCMeta(taskDir)
@@ -226,7 +249,7 @@ func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string, stats *gcStats) 
 			}
 		}
 		action := d.shouldCleanTaskDir(ctx, taskDir)
-		cleanedHere += d.applyGCAction(taskDir, action, stats)
+		cleanedHere += apply(taskDir, meta, gcDecision{action: action})
 	}
 	workspaceIDs := make([]string, 0, len(issueCandidatesByWorkspace))
 	for workspaceID := range issueCandidatesByWorkspace {
@@ -234,16 +257,9 @@ func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string, stats *gcStats) 
 	}
 	sort.Strings(workspaceIDs)
 	for _, workspaceID := range workspaceIDs {
-		cleanedHere += d.gcWorkspaceIssues(ctx, workspaceID, issueCandidatesByWorkspace[workspaceID], stats)
+		cleanedHere += d.gcWorkspaceIssues(ctx, workspaceID, issueCandidatesByWorkspace[workspaceID], stats, apply)
 	}
-
-	// Remove the workspace directory itself if it's now empty.
-	if cleanedHere > 0 {
-		remaining, _ := os.ReadDir(wsDir)
-		if len(remaining) == 0 {
-			os.Remove(wsDir)
-		}
-	}
+	return cleanedHere
 }
 
 const issueGCBatchSize = 500
@@ -257,7 +273,13 @@ type issueGCCandidate struct {
 // of workspace-level requests. Multiple task dirs for the same issue share one
 // result. The client transparently falls back to the legacy per-issue endpoint
 // when it is connected to an older server.
-func (d *Daemon) gcWorkspaceIssues(ctx context.Context, workspaceID string, candidates []issueGCCandidate, stats *gcStats) int {
+func (d *Daemon) gcWorkspaceIssues(
+	ctx context.Context,
+	workspaceID string,
+	candidates []issueGCCandidate,
+	stats *gcStats,
+	apply func(taskDir string, meta *execenv.GCMeta, dec gcDecision) int,
+) int {
 	if len(candidates) == 0 {
 		return 0
 	}
@@ -306,13 +328,13 @@ func (d *Daemon) gcWorkspaceIssues(ctx context.Context, workspaceID string, cand
 			// data stays. The regenerable Codex cache is still fair game —
 			// see applyManagedArtifactFallback.
 			action := d.applyManagedArtifactFallback(candidate.taskDir, candidate.meta, gcActionSkip)
-			cleaned += d.applyGCAction(candidate.taskDir, action, stats)
+			cleaned += apply(candidate.taskDir, candidate.meta, gcDecision{action: action})
 			continue
 		}
 		action := d.gcDecisionIssueResult(candidate.taskDir, candidate.meta, result)
 		action = d.applyLocalDirectoryGCOverride(candidate.meta, action)
 		action = d.applyManagedArtifactFallback(candidate.taskDir, candidate.meta, action)
-		cleaned += d.applyGCAction(candidate.taskDir, action, stats)
+		cleaned += apply(candidate.taskDir, candidate.meta, gcDecision{action: action})
 	}
 	return cleaned
 }
@@ -386,6 +408,26 @@ func recordArtifactCleanup(stats *gcStats, removed int, bytes int64, perPattern 
 	}
 	for pattern, count := range perPattern {
 		stats.byPattern[pattern] += count
+	}
+}
+
+// gcDecision 是一次遍历对某个任务目录做出的判断。
+//
+// 比裸的 gcAction 多一个 active：正在跑的目录 GC 无论如何都不会动它，但这个事实本身
+// 是用户想看的（预览里显示为「正在运行」）。真实 GC 把它记成 skipped，行为与以前一致。
+type gcDecision struct {
+	action gcAction
+	active bool
+}
+
+// realGCApply 是真实 GC 的 apply：把判断变成删除。
+func (d *Daemon) realGCApply(stats *gcStats) func(string, *execenv.GCMeta, gcDecision) int {
+	return func(taskDir string, _ *execenv.GCMeta, dec gcDecision) int {
+		if dec.active {
+			stats.skipped++
+			return 0
+		}
+		return d.applyGCAction(taskDir, dec.action, stats)
 	}
 }
 
