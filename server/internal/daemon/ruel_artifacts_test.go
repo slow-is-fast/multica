@@ -297,12 +297,17 @@ func TestCollectRuelArtifactsStatus(t *testing.T) {
 		}
 	})
 
-	t.Run("没碰仓库：work_dir 为空或不存在", func(t *testing.T) {
-		if got := collectRuelArtifacts(""); got.Status != artifacts.StatusNoRepo {
-			t.Errorf("空 work_dir 应当是 %s，实际 %s", artifacts.StatusNoRepo, got.Status)
-		}
-		if got := collectRuelArtifacts(filepath.Join(t.TempDir(), "不存在")); got.Status != artifacts.StatusNoRepo {
-			t.Errorf("不存在的目录应当是 %s，实际 %s", artifacts.StatusNoRepo, got.Status)
+	// 连工作目录都没有 ≠ 采集到了「没有仓库」。前者是这次压根没采集，结论行必须缺席
+	// （前端的第四种状态就是「没有结论行」），把它记成 no_repo 是在编造一次采集。
+	t.Run("没有工作目录：这次不采集，不给结论", func(t *testing.T) {
+		for _, dir := range []string{"", "  ", filepath.Join(t.TempDir(), "不存在")} {
+			got := collectRuelArtifacts(dir)
+			if got.Status != "" {
+				t.Errorf("work_dir %q 不该给出结论，实际 %s（%s）", dir, got.Status, got.Diagnostic)
+			}
+			if len(got.Items) != 0 {
+				t.Errorf("work_dir %q 不该产出任何产物，实际 %d 条", dir, len(got.Items))
+			}
 		}
 	})
 

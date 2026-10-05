@@ -64,13 +64,17 @@ type ruelArtifactCollection struct {
 }
 
 // collectRuelArtifacts 读出一个 worktree 的变更，并给出这次采集的结论。
+//
+// 返回的 Status 为空串表示「这次没有采集」，与「采集了但结果是 X」是两件事：前者不写
+// 任何结论行，前端据此显示「从未采集」，后者才落成一条 collection_status。把连工作目录
+// 都没有的 Run 记成 no_repo 是撒谎——它没有「找不到仓库」，它根本没有可以找的地方。
 func collectRuelArtifacts(workDir string) ruelArtifactCollection {
 	workDir = strings.TrimSpace(workDir)
 	if workDir == "" {
-		return ruelArtifactCollection{Status: artifacts.StatusNoRepo, Diagnostic: "work_dir 为空"}
+		return ruelArtifactCollection{}
 	}
 	if _, err := os.Stat(workDir); err != nil {
-		return ruelArtifactCollection{Status: artifacts.StatusNoRepo, Diagnostic: "work_dir 不可访问"}
+		return ruelArtifactCollection{}
 	}
 
 	// 先定位、再判断结论：定位不到仓库与「仓库里没改动」是两件事，不能都归成空。

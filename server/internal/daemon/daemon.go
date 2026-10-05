@@ -6428,12 +6428,18 @@ func (d *Daemon) sendTerminalTaskReport(ctx context.Context, report terminalTask
 		}
 		// 结论无论有没有产物都要上报：只读的 Run 与采集失败的 Run 在产物表里都是
 		// 空的，靠这一条才能分开。
-		if statusErr := d.client.reportRuelArtifactStatus(ctx, report.taskID, ruelArtifactStatusPayload{
-			Status:     ruelColl.Status,
-			Diagnostic: ruelColl.Diagnostic,
-		}); statusErr != nil {
-			slog.Warn("ruel: 上报采集结论失败，该 Run 的「无产物」原因不可知",
-				"task_id", report.taskID, "status", ruelColl.Status, "error", statusErr)
+		//
+		// 但前提是**这次确实采集了**。Status 为空意味着连工作目录都没有（见
+		// collectRuelArtifacts），此时写一条结论等于编造一个从未发生过的采集——
+		// 「从没采集」本来就该用「没有结论行」来表达。
+		if ruelColl.Status != "" {
+			if statusErr := d.client.reportRuelArtifactStatus(ctx, report.taskID, ruelArtifactStatusPayload{
+				Status:     ruelColl.Status,
+				Diagnostic: ruelColl.Diagnostic,
+			}); statusErr != nil {
+				slog.Warn("ruel: 上报采集结论失败，该 Run 的「无产物」原因不可知",
+					"task_id", report.taskID, "status", ruelColl.Status, "error", statusErr)
+			}
 		}
 		return nil
 	case terminalTaskReportFail:
