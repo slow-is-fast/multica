@@ -17,6 +17,9 @@ package handler
 //     只认**非终态**的发言 Run。已完成的 Run 解析不出 human originator，private agent
 //     的委派会被直接拒掉。所以「跑完再派」这条路径根本走不通；环路真正可能的走法是
 //     「在自己的 Run 还没结束时就发出委派，然后才结束这一轮」——本文件测的就是这种。
+//
+// 结论：交替循环**没有尽头**（实测 20 轮 → 21 个 Run）。据此在 fork 里补了深度闸门
+// （ruel_delegation_depth.go），本文件随之改为验证链会在上限处停住，并且停得有说法。
 
 import (
 	"context"
@@ -108,44 +111,64 @@ func newRuelCyclePair(t *testing.T, title string) (issueID, agentA, agentB, runt
 	return issueID, agentA, agentB, runtimeA, runtimeB
 }
 
-// TestRuelDelegationChainHasNoDepthCap 测「各自在 Run 未结束时交替委派」有没有尽头。
+// queuedRuelRun 取某个 Agent 在这条 Issue 上最新入队的 Run；没有就返回 false。
 //
-// 断言的是**现状**：每一轮都成功入队、且 delegated_from 串得上。这不是「期望」——期望写
-// 在 PRD 里（循环/重复被拦截）。将来若加了深度闸门，本用例会在第 N 轮失败，那时它提醒的
-// 是「闸门生效了，把断言改成链被截断在第 N 轮」，不是回归。
-func TestRuelDelegationChainHasNoDepthCap(t *testing.T) {
+// 不能像 dbfx.QueryRow 那样查不到就 Fatal——闸门生效的那一轮**正是**查不到，那是要验的
+// 结果，不是测试写错了。
+func queuedRuelRun(t *testing.T, issueID, agentID string) (string, bool) {
+	t.Helper()
+	var id string
+	err := testPool.QueryRow(context.Background(),
+		`SELECT id FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' ORDER BY created_at DESC LIMIT 1`,
+		issueID, agentID).Scan(&id)
+	if err != nil {
+		return "", false
+	}
+	return id, true
+}
+
+// TestRuelDelegationChainStopsAtDepthLimit 守那条补上的深度闸门。
+//
+// 两个 Agent 各自在 Run 未结束时交替派单——这是实测中唯一能绕开上游三道部分闸门的走法
+// （换人躲开线程去重、未终态躲开授权闸门、回复躲开线程约束）。闸门生效后，链必须在
+// ruelDelegationDepthLimit 处停住，而且**停得有说法**：拒绝要回到调用方（reason_code），
+// 不能是静默丢弃——派单的 Agent 以为自己派出去了、实际没人接，是最糟的一种失败。
+func TestRuelDelegationChainStopsAtDepthLimit(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
-	issueID, agentA, agentB, runtimeA, runtimeB := newRuelCyclePair(t, "Ruel: does a delegation chain have an end?")
+	issueID, agentA, agentB, runtimeA, runtimeB := newRuelCyclePair(t, "Ruel: does a delegation chain stop?")
 
-	// 起点：A 的一轮 Run 已经在跑（非终态，才有资格发出委派）。
 	current := dbfx.Task(t, agentA, testutil.Cols{
 		"runtime_id": runtimeA, "issue_id": issueID, "status": "running",
 		"originator_user_id": testUserID, "accountable_user_id": testUserID,
 	})
 
-	const rounds = 6
 	// 委派链被 409 钉在同一条线程里：第一轮开线程，之后每轮都回复在前一轮的评论下。
 	var parent string
-	for i := 0; i < rounds; i++ {
+	hops := 0
+	refused := false
+	for i := 0; i < ruelDelegationDepthLimit+3; i++ {
 		from, to, toRuntime := agentA, agentB, runtimeB
 		if i%2 == 1 {
 			from, to, toRuntime = agentB, agentA, runtimeA
 		}
-		// from 在自己的 Run 还没结束时把活派给 to。
 		comment := postRuelDelegationComment(t, issueID, from, to, current, parent)
 		parent = comment.ID
-		next := latestQueuedRun(t, issueID, to)
-		// 然后这一轮才结束——清掉 from 的活跃 Run，下一轮才有可能派回它。
+		next, ok := queuedRuelRun(t, issueID, to)
+		// from 这一轮结束，下一轮才可能派回它。
 		finishRuelCycleRun(t, current)
-		// to 认领并跑起来，下一轮由它发言。
+		if !ok {
+			// 闸门拦住了：没有新的 Run。拒绝必须带回原因。
+			assertRuelDepthRefusal(t, comment, to)
+			refused = true
+			break
+		}
 		if claimed := claimRuelCycleRun(t, toRuntime); claimed == nil || claimed.ID != next {
 			t.Fatalf("round %d: %s did not claim its delegated run", i+1, to)
 		}
 		startRuelCycleRun(t, ctx, next)
-
 		var delegated string
 		dbfx.QueryRow(t,
 			`SELECT COALESCE(delegated_from_task_id::text, '') FROM agent_task_queue WHERE id = $1`, next,
@@ -154,14 +177,40 @@ func TestRuelDelegationChainHasNoDepthCap(t *testing.T) {
 			t.Fatalf("round %d: 委派关系没接上，delegated_from = %q, want %q", i+1, delegated, current)
 		}
 		current = next
+		hops++
 	}
 
+	if !refused {
+		t.Fatalf("链跑了 %d 次转手仍未被拦住，上限是 %d", hops, ruelDelegationDepthLimit)
+	}
+	if hops != ruelDelegationDepthLimit {
+		t.Fatalf("转手 %d 次才停，want %d（上限之内应当照常放行，越限才拦）", hops, ruelDelegationDepthLimit)
+	}
 	var total int
 	dbfx.QueryRow(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1`, issueID).Scan(&total)
-	t.Logf("交替委派 %d 轮后，这条 Issue 上共有 %d 个 Run（起始 1 + 每轮 1）", rounds, total)
-	if total != rounds+1 {
-		t.Fatalf("chain length = %d, want %d: 每一轮都应新起一个 Run（现状记录，见本用例注释）", total, rounds+1)
+	if total != ruelDelegationDepthLimit+1 {
+		t.Fatalf("Run 总数 = %d, want %d（起始 1 + 上限内的 %d 次转手）", total, ruelDelegationDepthLimit+1, ruelDelegationDepthLimit)
 	}
+	t.Logf("交替委派在第 %d 次转手处被拦住，这条 Issue 上共 %d 个 Run", hops, total)
+}
+
+// assertRuelDepthRefusal 校验「拒绝」被如实上报，而不是静默丢弃。
+func assertRuelDepthRefusal(t *testing.T, comment CommentResponse, targetAgentID string) {
+	t.Helper()
+	for _, outcome := range comment.TriggerOutcomes {
+		if outcome.TargetID != targetAgentID {
+			continue
+		}
+		if outcome.Status != DispatchBlocked {
+			t.Fatalf("被拦的那一轮 status = %q, want %q", outcome.Status, DispatchBlocked)
+		}
+		if outcome.ReasonCode != ReasonDelegationDepthExceeded {
+			t.Fatalf("reason_code = %q, want %q", outcome.ReasonCode, ReasonDelegationDepthExceeded)
+		}
+		return
+	}
+	t.Fatalf("响应里没有 %s 的触发结果（%d 条）：拒绝必须回到调用方，不能静默丢弃",
+		targetAgentID, len(comment.TriggerOutcomes))
 }
 
 // TestRuelDuplicateDelegationSameThreadIsCoalesced 测去重守得住的那一半。

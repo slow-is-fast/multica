@@ -2260,6 +2260,14 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 				// no-blocker case; we simply never PROMISE it.)
 			}
 		}
+		// Ruel 新增：委派链的深度闸门。只挡**新起一个 Run**这一步，合并进已有 Run
+		// （上面 (a) 的 coalesced）与登记成待办输入（(c) 的 deferred）都不算多一次
+		// 转手，不该被拦。见 ruel_delegation_depth.go。
+		if depth, tooDeep := h.ruelDelegationChainTooDeep(ctx, triggerCommentID); tooDeep {
+			ruelLogDelegationDepthExceeded(ctx, uuidToString(issue.ID), uuidToString(trigger.Agent.ID),
+				uuidToString(triggerCommentID), depth)
+			return DispatchBlocked, ReasonDelegationDepthExceeded
+		}
 		if err := h.enqueueSingleCommentTrigger(ctx, issue, triggerCommentID, trigger); err != nil {
 			// Lost the enqueue race: a sibling task for this (issue, agent) now
 			// exists. Re-resolve as pending so the next attempt folds this

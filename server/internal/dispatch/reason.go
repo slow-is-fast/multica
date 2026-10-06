@@ -89,6 +89,19 @@ const (
 	// nothing is pending — the trigger is answered by accepting the issue out of
 	// Triage, not by waiting.
 	ReasonIssueInTriage ReasonCode = "issue_in_triage"
+	// ReasonDelegationDepthExceeded: Ruel 新增。这条触发会让委派链再长一环，而链已经
+	// 到了上限——拒绝入队。
+	//
+	// 上游没有委派深度闸门：委派只在子 Run 上拷一份父 id（`delegated_from_task_id`），
+	// 没有任何计数、深度或时间窗会累积。实测两个 Agent 各自在 Run 未结束时交替派单，
+	// 20 轮下来一条 Issue 上有 21 个 Run，且没有成本预算兜底——它会一直跑到有人发现。
+	// 上游唯一声称能防住这事的是 `HasPendingTaskForIssueAndAgent` 去重，而它按
+	// (issue, agent, thread) 记，交替循环每轮换人且上一轮已终态，一次都命中不了。
+	//
+	// 与 invocation_not_allowed 之类分开，是因为**修法不同**：权限问题要改授权，这里要
+	// 做的是把链断开或让人接手。跟 already_active 也分开——那是一条 Run 正在跑，这里是
+	// 一条链跑太久了。
+	ReasonDelegationDepthExceeded ReasonCode = "delegation_depth_exceeded"
 	// ReasonQuotaExceeded is a policy-neutral refusal for an exhausted
 	// Cloud-provided autopilot interval.
 	ReasonQuotaExceeded ReasonCode = "quota_exceeded"

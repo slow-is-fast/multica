@@ -69,6 +69,8 @@ const (
 	ReasonSelfTriggerSuppressed = dispatch.ReasonSelfTriggerSuppressed
 	ReasonIssueInTriage         = dispatch.ReasonIssueInTriage
 	ReasonInternalError         = dispatch.ReasonInternalError
+	// Ruel 新增：委派链到了深度上限，见 dispatch.ReasonDelegationDepthExceeded。
+	ReasonDelegationDepthExceeded = dispatch.ReasonDelegationDepthExceeded
 )
 
 // DispatchTarget is the caller-visible reference to an execution target. Name
