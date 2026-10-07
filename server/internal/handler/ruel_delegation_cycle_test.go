@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
@@ -131,7 +132,7 @@ func queuedRuelRun(t *testing.T, issueID, agentID string) (string, bool) {
 //
 // 两个 Agent 各自在 Run 未结束时交替派单——这是实测中唯一能绕开上游三道部分闸门的走法
 // （换人躲开线程去重、未终态躲开授权闸门、回复躲开线程约束）。闸门生效后，链必须在
-// ruelDelegationDepthLimit 处停住，而且**停得有说法**：拒绝要回到调用方（reason_code），
+// service.RuelDelegationDepthLimit 处停住，而且**停得有说法**：拒绝要回到调用方（reason_code），
 // 不能是静默丢弃——派单的 Agent 以为自己派出去了、实际没人接，是最糟的一种失败。
 func TestRuelDelegationChainStopsAtDepthLimit(t *testing.T) {
 	if testHandler == nil || testPool == nil {
@@ -149,7 +150,7 @@ func TestRuelDelegationChainStopsAtDepthLimit(t *testing.T) {
 	var parent string
 	hops := 0
 	refused := false
-	for i := 0; i < ruelDelegationDepthLimit+3; i++ {
+	for i := 0; i < service.RuelDelegationDepthLimit+3; i++ {
 		from, to, toRuntime := agentA, agentB, runtimeB
 		if i%2 == 1 {
 			from, to, toRuntime = agentB, agentA, runtimeA
@@ -181,15 +182,15 @@ func TestRuelDelegationChainStopsAtDepthLimit(t *testing.T) {
 	}
 
 	if !refused {
-		t.Fatalf("链跑了 %d 次转手仍未被拦住，上限是 %d", hops, ruelDelegationDepthLimit)
+		t.Fatalf("链跑了 %d 次转手仍未被拦住，上限是 %d", hops, service.RuelDelegationDepthLimit)
 	}
-	if hops != ruelDelegationDepthLimit {
-		t.Fatalf("转手 %d 次才停，want %d（上限之内应当照常放行，越限才拦）", hops, ruelDelegationDepthLimit)
+	if hops != service.RuelDelegationDepthLimit {
+		t.Fatalf("转手 %d 次才停，want %d（上限之内应当照常放行，越限才拦）", hops, service.RuelDelegationDepthLimit)
 	}
 	var total int
 	dbfx.QueryRow(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1`, issueID).Scan(&total)
-	if total != ruelDelegationDepthLimit+1 {
-		t.Fatalf("Run 总数 = %d, want %d（起始 1 + 上限内的 %d 次转手）", total, ruelDelegationDepthLimit+1, ruelDelegationDepthLimit)
+	if total != service.RuelDelegationDepthLimit+1 {
+		t.Fatalf("Run 总数 = %d, want %d（起始 1 + 上限内的 %d 次转手）", total, service.RuelDelegationDepthLimit+1, service.RuelDelegationDepthLimit)
 	}
 	t.Logf("交替委派在第 %d 次转手处被拦住，这条 Issue 上共 %d 个 Run", hops, total)
 }
