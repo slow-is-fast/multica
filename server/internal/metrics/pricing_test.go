@@ -362,10 +362,72 @@ func TestPriceForModelAliasNoFalseBorrowing(t *testing.T) {
 		"qwen3.6-flash[]",
 		"qwen3.8-max[]",
 		"qwen3.8-max-preview[]",
+		// GLM-5's neighbours are distinct SKUs at their own rates: they must
+		// not borrow the GLM-5 row just because its id is a prefix of theirs.
+		"glm-5.1",
+		"glm-5-turbo",
+		"glm-5-preview",
 	} {
 		if _, ok := PriceForModelAlias(model); ok {
 			t.Fatalf("PriceForModelAlias(%q) unexpectedly resolved", model)
 		}
+	}
+}
+
+// TestZhipuGLM5Priced is the #24 regression: the Go rate table was missing the
+// entire glm family that packages/views/runtimes/utils.ts already carried, so
+// every local turn — 21 of 24 usage rows on this machine — fell into the
+// unpriced bucket and converted to $0.00. A conversion that is always zero is
+// worse than no conversion: the cost alert in PRD 6.6.1 sits on top of it and
+// can never fire.
+//
+// The case also pins the shape that matters most here: cache_read dominates
+// this machine's usage (5.06M cache-read tokens against 1.00M input over the
+// same window), so a row with the wrong cache rate under-prices by more than
+// the input row can correct.
+func TestZhipuGLM5Priced(t *testing.T) {
+	price, ok := PriceForModelAlias("glm-5")
+	if !ok {
+		t.Fatal("PriceForModelAlias(\"glm-5\") did not resolve; the glm family is missing from the Go table again")
+	}
+	want := ModelPrice{Provider: "zhipu", Model: "glm-5", InputPerM: 1.00, CacheReadPerM: 0.20, CacheWritePerM: 1.00, OutputPerM: 3.20}
+	if price != want {
+		t.Fatalf("PriceForModelAlias(\"glm-5\") = %+v, want %+v", price, want)
+	}
+
+	// A context tag is the same SKU at the same tier.
+	if got, ok := PriceForModelAlias("glm-5[1m]"); !ok || got != want {
+		t.Fatalf("PriceForModelAlias(\"glm-5[1m]\") = %+v (ok=%v); want %+v", got, ok, want)
+	}
+	// So is a provider-prefixed form, mirroring the Alibaba/Qwen cases.
+	if got, ok := PriceForModelAlias("custom:glm-5"); !ok || got != want {
+		t.Fatalf("PriceForModelAlias(\"custom:glm-5\") = %+v (ok=%v); want %+v", got, ok, want)
+	}
+
+	// A median-sized real turn must convert to a non-zero cost. These three
+	// numbers are the p50 of the 21 `glm-5` usage rows on this machine
+	// (2026-10-07): p50 input 43,068 / output 1,198 / cache-read 240,128.
+	const (
+		input     = 43_068
+		output    = 1_198
+		cacheRead = 240_128
+	)
+	got := tokenCostUSD(input, price.InputPerM) +
+		tokenCostUSD(output, price.OutputPerM) +
+		tokenCostUSD(cacheRead, price.CacheReadPerM)
+	if got <= 0 {
+		t.Fatalf("median turn cost = %v; want non-zero", got)
+	}
+	// Guard the cache term specifically: it is the largest component, so a
+	// row that silently priced cache reads at 0 would still pass a loose
+	// "non-zero" check on the input term alone.
+	cacheTerm := tokenCostUSD(cacheRead, price.CacheReadPerM)
+	if cacheTerm <= 0 {
+		t.Fatalf("cache-read term = %v; want non-zero", cacheTerm)
+	}
+	if cacheTerm <= tokenCostUSD(input, price.InputPerM) {
+		t.Fatalf("cache-read term %v should exceed the input term %v at this machine's cache:input ratio",
+			cacheTerm, tokenCostUSD(input, price.InputPerM))
 	}
 }
 

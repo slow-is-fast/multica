@@ -103,6 +103,26 @@ var modelPrices = map[string]ModelPrice{
 	// providers/moonshotai/models/kimi-k3.toml). Moonshot bills no separate
 	// cache write, so CacheWritePerM mirrors Input.
 	"moonshotai:kimi-k3": {Provider: "moonshotai", Model: "kimi-k3", InputPerM: 3.0, CacheReadPerM: 0.30, CacheWritePerM: 3.0, OutputPerM: 15.0},
+	// Zhipu GLM-5 (docs.bigmodel.cn/cn/guide/start/pricing, accessed
+	// 2026-10-07). Rates are the published INTERNATIONAL USD list: $1.00
+	// input / $3.20 output / $0.20 cache hit per 1M tokens.
+	//
+	// Two caveats this row cannot express, both recorded rather than hidden:
+	//   - The domestic CNY list is cheaper AND tiered by input length
+	//     (4/18 CNY below 32K, 6/22 CNY at or above, cache hit 1 / 1.5), so
+	//     one flat row over-reports domestic usage. That is tolerable only
+	//     because the alerting rule is RELATIVE (3x the agent's own median),
+	//     which cancels a constant factor; an ABSOLUTE budget cap would need
+	//     the domestic rate instead.
+	//   - Cache storage is currently free ("限时免费") with no published
+	//     standard rate, and Zhipu publishes no separate cache-write rate, so
+	//     CacheWritePerM mirrors Input — the convention the xAI and Moonshot
+	//     rows use.
+	//
+	// This mirrors packages/views/runtimes/utils.ts, which has carried the
+	// whole glm family all along; the Go table was simply missing it (see
+	// TestZhipuGLM5Priced).
+	"zhipu:glm-5": {Provider: "zhipu", Model: "glm-5", InputPerM: 1.00, CacheReadPerM: 0.20, CacheWritePerM: 1.00, OutputPerM: 3.20},
 	// Volcengine Ark (ark.cn-beijing.volces.com). `ark-code-latest` is a
 	// rolling alias whose target can be switched in the Volcengine console
 	// (across model families), so it is not a stable model identity; the
@@ -215,6 +235,10 @@ var modelAliasRules = []struct {
 	// unmapped; `kimi-code/k3` (Kimi Code CLI) resolves via the `/k3$` form.
 	{regexp.MustCompile(`(^|/|:)kimi-k3$`), "moonshotai:kimi-k3"},
 	{regexp.MustCompile(`(^|/|:)k3$`), "moonshotai:kimi-k3"},
+	// Zhipu GLM-5. Anchored so the neighbouring SKUs the frontend also carries
+	// (`glm-5.1`, `glm-5-turbo`) stay unmapped until they get rows of their
+	// own — same "every catalog SKU needs its own row" rule.
+	{regexp.MustCompile(`(^|/|:)glm-5$`), "zhipu:glm-5"},
 	// Volcengine Ark `ark-code-latest` is deliberately absent: it is a
 	// console-switchable rolling alias across model families, not a stable
 	// model identity, so it stays unmapped.
