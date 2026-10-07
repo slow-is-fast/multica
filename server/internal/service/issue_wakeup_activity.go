@@ -28,6 +28,10 @@ const (
 	wakeupPausedLoop         = "loop"
 	wakeupPausedRate         = "rate"
 	wakeupPausedMaxFires     = "max_fires"
+	// wakeupPausedDelegationDepth: Ruel 新增。这个 wakeup 的源 Run 已经在委派链的深度上限
+	// 上，它起的每一个 Run 都会再转一次手，所以不是「这次跳过」而是「永远不许起」——
+	// 见 issue_wakeup.go 里的闸门与 ruel_delegation_depth.go。
+	wakeupPausedDelegationDepth = "delegation_depth"
 	wakeupTimeoutEventType   = "wakeup.timeout"
 	wakeupManualEventType    = "wakeup.manual"
 	wakeupConditionEventType = "condition.met"

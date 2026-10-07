@@ -648,6 +648,24 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	}
 	overlay := s.Tasks.buildRuntimeMCPOverlay(ctx, attr.UserID, agent)
 	source, delegatedFrom, _, _ := attributionCreateParams(attr)
+	// Ruel 新增：委派链深度闸门（见 service/ruel_delegation_depth.go）。child_done 级联起的
+	// Run 也会认一个父 Run，同样是一次转手。父子结构本身是树不是环，但一个深链上的子 Issue
+	// 关闭时会一路往上唤醒，深度照样会累积。
+	//
+	// 与另一条 wakeup 路径同样用 pause 收尾：这里的 delegatedFrom 来自 attribution，同一条
+	// 系统规则每次都解析到同一个父，超深一次就是永远超深。
+	if err := s.Tasks.ruelGuardDelegationDepth(ctx, delegatedFrom, issue.ID, agent.ID, "issue_wakeup_system"); err != nil {
+		if err = q.PauseIssueWakeup(ctx, db.PauseIssueWakeupParams{ID: w.ID, PausedReason: pgtype.Text{String: wakeupPausedDelegationDepth, Valid: true}, BlockRuns: true}); err != nil {
+			return err
+		}
+		if err = q.DiscardWakeupReceipts(ctx, w.ID); err != nil {
+			return err
+		}
+		if err = note(wakeupActivityPaused, map[string]any{"rule": SystemRuleChildDone, "reason": wakeupPausedDelegationDepth, "limit": RuelDelegationDepthLimit}); err != nil {
+			return err
+		}
+		return commit()
+	}
 	contextJSON, _ := json.Marshal(map[string]any{"wakeup_id": util.UUIDToString(w.ID), "wakeup_revision": w.Revision, "wakeup_evidence": evidence, "wakeup_system": SystemRuleChildDone})
 	task, err = q.CreateWakeupTask(ctx, db.CreateWakeupTaskParams{
 		ID: dbid.NewV7(), AgentID: agent.ID, RuntimeID: agent.RuntimeID, IssueID: issue.ID, Priority: priorityToInt(issue.Priority),

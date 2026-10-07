@@ -1288,6 +1288,12 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
+	// Ruel 新增：委派链深度闸门（见 ruel_delegation_depth.go）。按**父 Run**判，不按评论判
+	// —— 这条函数同时服务评论触发、直接指派、以及 Agent 自建 Issue 后自动入队，后两条没有
+	// 评论，按评论判就漏了。
+	if err := s.ruelGuardDelegationDepth(ctx, attrDelegatedFrom, issue.ID, issue.AssigneeID, "enqueue_issue_task"); err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 	createParams := db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              issue.AssigneeID,
@@ -1459,6 +1465,10 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
+	// Ruel 新增：委派链深度闸门（见 ruel_delegation_depth.go）。
+	if err := s.ruelGuardDelegationDepth(ctx, attrDelegatedFrom, issue.ID, agentID, "enqueue_mention_task"); err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              agentID,
@@ -6643,6 +6653,17 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 			ruleVersionID = target.source.RuleVersionID
 		}
 		overlay := s.buildRuntimeMCPOverlay(ctx, originator, target.agent)
+		// Ruel 新增：委派链深度闸门（见 ruel_delegation_depth.go）。放在这里而不是函数
+		// 开头，是刻意的——这条路径自己有次数预算（maxAttempts 与
+		// delegatedFailureRecoveryMaxTaskAttempts），先让它判完；预算之内的一次正常恢复
+		// 不该被当成超深拒掉。预算判完之后仍然超深的，才说明链本身该停了。
+		//
+		// 拒绝后不返回 error：这里的返回值会被上层当作「没覆盖到」，而超深是**有结论**的
+		// —— 链到头了，不该再转。交给 exhaustDelegatedFailureRecovery 走它自己的终态
+		// （发帖说明为什么不会再跑），比让调用方拿到一个它不认识的错误要好。
+		if err := s.ruelGuardDelegationDepth(ctx, target.failed.ID, target.issue.ID, target.agent.ID, "delegated_failure_recovery"); err != nil {
+			return delegatedFailureRecoveryCovered, nil
+		}
 		task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 			ID:                   dbid.NewV7(),
 			AgentID:              target.agent.ID,

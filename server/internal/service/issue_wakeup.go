@@ -1054,6 +1054,26 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 			}
 		}
 	}
+	// Ruel 新增：委派链深度闸门（见 service/ruel_delegation_depth.go）。wakeup 起的 Run 会
+	// 把建这个 wakeup 的 Run 认作父，同样是一次转手。上游对 wakeup 有速率兜底（max_fires、
+	// 每小时运行上限），但那只拖得慢，停不下来。
+	//
+	// 这里用上游自己的 pause 模式收尾，而不是跳过建 Run 继续往下走：wakeup 的
+	// source_task_id 是建它时写死的，超深一次就意味着**永远**超深。每次触发都静默跳过，
+	// 等于一个永不报错、永不起作用的 wakeup——那是比拒绝更糟的状态。暂停 + 丢回执 + 发
+	// 一条 timeline，是这条路上唯一诚实的结局。
+	if err := s.Tasks.ruelGuardDelegationDepth(ctx, w.SourceTaskID, w.IssueID, w.AgentID, "issue_wakeup"); err != nil {
+		if err = q.PauseIssueWakeup(ctx, db.PauseIssueWakeupParams{ID: w.ID, PausedReason: pgtype.Text{String: wakeupPausedDelegationDepth, Valid: true}, BlockRuns: true}); err != nil {
+			return err
+		}
+		if err = q.DiscardWakeupReceipts(ctx, w.ID); err != nil {
+			return err
+		}
+		if err = note(wakeupActivityPaused, map[string]any{"reason": wakeupPausedDelegationDepth, "limit": RuelDelegationDepthLimit}); err != nil {
+			return err
+		}
+		return commit()
+	}
 	noteText, evidence := mergeWakeupEvidence(w, task, receipts)
 	if taskExists {
 		task, err = q.ReplaceWakeupEvidence(ctx, db.ReplaceWakeupEvidenceParams{ID: task.ID, HandoffNote: pgtype.Text{String: noteText, Valid: true}, WakeupEvidence: evidence})
