@@ -13,8 +13,19 @@ import (
 )
 
 const (
-	claudeSupplementInitializeID     = "multica-supplement-initialize"
-	claudeSupplementHandshakeTimeout = 3 * time.Second
+	claudeSupplementInitializeID = "multica-supplement-initialize"
+	// claudeSupplementHandshakeTimeout bounds the initialize round trip that
+	// registers the supplement hooks. Measured on Windows against Claude Code
+	// 2.1.223 (2026-10-07, n=5): the control_response lands at 3.08s-4.00s,
+	// median 3.43s, so a 3s bound failed 5/5 and silently disabled the whole
+	// feature — initialize never registered hooks, SupplementReady never turned
+	// true, and every supplement settled as turn_ended with attempt_count=0.
+	//
+	// The wait also delays the initial prompt, so this stays a single bounded
+	// wait rather than a retry loop: SupportsTaskSupplement already gates the
+	// handshake to providers expected to answer, so a provider that never
+	// answers is a degraded case, not the common one.
+	claudeSupplementHandshakeTimeout = 15 * time.Second
 )
 
 // All four context events support additionalContext; Stop uses decision/reason.
