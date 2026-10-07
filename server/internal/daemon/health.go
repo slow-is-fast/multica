@@ -414,6 +414,9 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	// 因为决策要用 daemon 的内存状态（哪些目录正在跑）与服务端查询——CLI 另算一套
 	// 会与真实 GC 分叉。实现见 gcplan.go。
 	mux.HandleFunc("/gc-plan", d.gcPlanHandler())
+	// Ruel 新增：保留策略（P0-9 的另一半）。同样放在 daemon 进程里：生效 TTL 只能从
+	// daemon 已经装载的 cfg 读，CLI 自己按默认值拼一遍就是拿默认值冒充生效值。
+	mux.HandleFunc("/gc-policy", d.gcPolicyHandler())
 
 	srv := &http.Server{Handler: mux}
 
@@ -445,6 +448,26 @@ func (d *Daemon) gcPlanHandler() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(report); err != nil {
 			d.logger.Warn("gc-plan: write response failed", "error", err)
+		}
+	}
+}
+
+// gcPolicyHandler 应答保留策略。同样只允许 GET：这是只读的配置快照。
+func (d *Daemon) gcPolicyHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			writeGCError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		report, err := d.PolicyGC(r.Context())
+		if err != nil {
+			writeGCError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(report); err != nil {
+			d.logger.Warn("gc-policy: write response failed", "error", err)
 		}
 	}
 }

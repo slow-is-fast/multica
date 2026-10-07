@@ -401,15 +401,28 @@ func touchHermesMemoryStore(storeDir string, logger *slog.Logger) {
 // reserve (may be nil) atomically claims a store for deletion, exactly as
 // PruneCodexSessionStores uses it: ok=false means a live task holds the store,
 // so it is left alone. nil disables the guard (tests).
+// HermesMemoryStoreRoot 是经批准知识（Hermes memory）存储的根目录——
+// PruneHermesMemoryStores 清的就是这一棵。导出的理由同 CodexSessionStoreRoot：
+// 报告必须与真实 GC 看同一棵树。
+//
+// 第二个返回值在 ProfileDir 解析失败时为 false（比如 HOME 不可用）。调用方要把它当
+// 「量不出来」处理，而不是当成 0 —— 0 会被读成「这棵是空的」。
+func HermesMemoryStoreRoot(daemonProfile string) (string, bool) {
+	profileDir, err := cli.ProfileDir(daemonProfile)
+	if err != nil {
+		return "", false
+	}
+	return filepath.Join(profileDir, hermesMemoryStoreRoot), true
+}
+
 func PruneHermesMemoryStores(daemonProfile string, retention time.Duration, now time.Time, reserve func(storeDir string) (commit func(), ok bool), logger *slog.Logger) (removed int, bytesFreed int64) {
 	if retention <= 0 {
 		return 0, 0
 	}
-	profileDir, err := cli.ProfileDir(daemonProfile)
-	if err != nil {
+	root, ok := HermesMemoryStoreRoot(daemonProfile)
+	if !ok {
 		return 0, 0
 	}
-	root := filepath.Join(profileDir, hermesMemoryStoreRoot)
 	agents, err := os.ReadDir(root)
 	if err != nil {
 		return 0, 0 // not created yet, or unreadable — nothing to prune

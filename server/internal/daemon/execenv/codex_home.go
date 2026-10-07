@@ -457,11 +457,21 @@ func sanitizePathSegment(s string) string {
 // the remove are effectively atomic, closing the stat->remove race a plain
 // point-in-time active check leaves open. nil disables the guard (tests): every
 // idle store is removed.
+// CodexSessionStoreRoot 是 Codex 会话存储的根目录——PruneCodexSessionStores 清的就是
+// 这一棵。
+//
+// 导出是为了让「保留策略」报告量的是**同一个**目录，而不是另拼一条路径。gc-plan 那条
+// 原则在这里同样成立：报告与真实行为分叉，比没有报告更糟——用户照着它判断「我还能用
+// 多久」，拿到的是另一棵树的大小。
+func CodexSessionStoreRoot(profile string) string {
+	return filepath.Join(resolveSharedCodexHome(), codexSessionStoreRoot, codexSessionStoreNamespace(profile))
+}
+
 func PruneCodexSessionStores(profile string, retention time.Duration, now time.Time, reserve func(storeDir string) (commit func(), ok bool), logger *slog.Logger) (removed int, bytesFreed int64) {
 	if retention <= 0 {
 		return 0, 0
 	}
-	root := filepath.Join(resolveSharedCodexHome(), codexSessionStoreRoot, codexSessionStoreNamespace(profile))
+	root := CodexSessionStoreRoot(profile)
 	agents, err := os.ReadDir(root)
 	if err != nil {
 		return 0, 0 // not created yet, or unreadable — nothing to prune
