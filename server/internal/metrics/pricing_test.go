@@ -713,3 +713,37 @@ func TestEstimateUsageCostKeepsUnknownApartFromZero(t *testing.T) {
 		t.Fatalf("test constant drifted: unknowns must lower the median")
 	}
 }
+
+// TestEstimateUsageCostPricesTheModelCodexNowReports pins the payoff of ruel
+// #32. Before it, every codex usage row reached this function as the literal
+// "unknown" even though its token counts were right there, so the row came
+// back unpriced and dropped out of medians and budgets.
+//
+// The numbers are real: the first codex Run after the adapter started
+// reporting a model (2026-10-07), 14,512 input / 773 output / 109,184 cache
+// read, recorded with model "gpt-5.6-sol" instead of "unknown".
+func TestEstimateUsageCostPricesTheModelCodexNowReports(t *testing.T) {
+	const codexIn, codexOut, codexCacheRead = 14_512, 773, 109_184
+
+	before := EstimateUsageCost("unknown", 0, codexIn, codexOut, codexCacheRead, 0)
+	if before.Source != CostSourceUnpriced {
+		t.Fatalf("pre-fix codex row: source = %q, want %q", before.Source, CostSourceUnpriced)
+	}
+	if before.Priceable() {
+		t.Fatal("pre-fix codex row is Priceable(); it must stay out of medians and budgets")
+	}
+
+	after := EstimateUsageCost("gpt-5.6-sol", 0, codexIn, codexOut, codexCacheRead, 0)
+	if after.Source != CostSourceTable {
+		t.Fatalf("post-fix codex row: source = %q, want %q", after.Source, CostSourceTable)
+	}
+	if after.USD <= 0 {
+		t.Fatalf("post-fix codex row: USD = %v, want > 0", after.USD)
+	}
+
+	// Two rows with identical tokens; only the model name differs. That one
+	// field is the whole of the gap #32 closed, so state it as the number it
+	// is worth rather than as a comment someone has to trust.
+	t.Logf("same codex tokens: unknown prices to %v (source %q), gpt-5.6-sol to %.4f USD (source %q)",
+		before.USD, before.Source, after.USD, after.Source)
+}

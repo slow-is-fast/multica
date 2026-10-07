@@ -963,8 +963,10 @@ func TestParseCodexSessionFileSubtractsCachedInput(t *testing.T) {
 	if got == nil {
 		t.Fatal("expected usage")
 	}
-	if got.model != "gpt-5.5" {
-		t.Fatalf("model = %q, want gpt-5.5", got.model)
+	// The model has its own reader now: it must be recoverable from this
+	// file even when scanning for usage would not have happened.
+	if gotModel := parseCodexSessionModel(path); gotModel != "gpt-5.5" {
+		t.Fatalf("model = %q, want gpt-5.5", gotModel)
 	}
 	if got.usage.InputTokens != 700 {
 		t.Fatalf("input tokens = %d, want uncached 700", got.usage.InputTokens)
@@ -1017,7 +1019,8 @@ func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
 		fmt.Sprintf(`{"timestamp":%q,"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500,"output_tokens":20},"model":"gpt-5.6-sol"}}}`, startTime.Add(2*time.Second).UTC().Format(time.RFC3339Nano)),
 		"",
 	}, "\n")
-	if err := os.WriteFile(filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl"), []byte(content), 0o644); err != nil {
+	rolloutPath := filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl")
+	if err := os.WriteFile(rolloutPath, []byte(content), 0o644); err != nil {
 		t.Fatalf("write session file: %v", err)
 	}
 
@@ -1028,8 +1031,10 @@ func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
 	if got.usage.InputTokens != 500 || got.usage.OutputTokens != 20 {
 		t.Errorf("usage = %+v, want input=500 output=20", got.usage)
 	}
-	if got.model != "gpt-5.6-sol" {
-		t.Errorf("model = %q, want gpt-5.6-sol", got.model)
+	// Model is read by its own pass over the file now (ruel #32): it has to
+	// be recoverable even when usage did not come from this file.
+	if gotModel := parseCodexSessionModel(rolloutPath); gotModel != "gpt-5.6-sol" {
+		t.Errorf("model = %q, want gpt-5.6-sol", gotModel)
 	}
 }
 

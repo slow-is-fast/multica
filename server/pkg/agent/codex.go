@@ -1905,14 +1905,17 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// Codex writes token_count events to $CODEX_HOME/sessions/YYYY/MM/DD/*.jsonl;
 		// scan this backend's per-task CODEX_HOME, since sessions are isolated
 		// there rather than in the shared ~/.codex/sessions (MUL-4424).
+		taskCodexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
 		if u.InputTokens == 0 && u.OutputTokens == 0 {
-			taskCodexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
 			if scanned := scanCodexSessionUsage(startTime, taskCodexHome, threadID, resumed); scanned != nil {
 				u = scanned.usage
-				if scanned.model != "" && opts.Model == "" {
-					opts.Model = scanned.model
-				}
 			}
+		}
+		// 模型名是**另一条线**，不去管用量走的哪条路：JSON-RPC 通知不带模型名，它只在
+		// 会话文件里。挂在上面那个分支里，等于宣布「只要 JSON-RPC 报了用量，这条用量的
+		// 模型名就一定是 unknown」——真机上 3/3 条 codex 用量正是这个结果（ruel #32）。
+		if opts.Model == "" {
+			opts.Model = codexSessionModel(startTime, taskCodexHome, threadID)
 		}
 
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
@@ -3944,7 +3947,6 @@ func codexInt64(m map[string]any, keys ...string) int64 {
 // codexSessionUsage holds usage extracted from a Codex session JSONL file.
 type codexSessionUsage struct {
 	usage TokenUsage
-	model string
 }
 
 // scanCodexSessionUsage extracts usage for threadID from its Codex rollout.
@@ -3953,12 +3955,11 @@ type codexSessionUsage struct {
 // concurrently-created rollout (for example a Codex subagent) from being billed
 // to this task. A resumed rollout keeps its original date directory, so both flat
 // and YYYY/MM/DD layouts are searched.
-func scanCodexSessionUsage(startTime time.Time, codexHome, threadID string, resumed bool) *codexSessionUsage {
-	root := codexSessionRoot(codexHome)
-	if root == "" || strings.TrimSpace(threadID) == "" {
-		return nil
-	}
-
+// latestCodexSessionRollout 挑这条 thread 最新一个 rollout 文件。
+//
+// 多个路径可能短暂共存（目录布局迁移期），它们属于同一个 owner，所以确定性地取最新
+// 的那个，而**绝不跨到另一条 thread 的 rollout**。
+func latestCodexSessionRollout(root, threadID string, startTime time.Time) string {
 	type candidate struct {
 		path    string
 		modTime time.Time
@@ -3966,13 +3967,13 @@ func scanCodexSessionUsage(startTime time.Time, codexHome, threadID string, resu
 	var files []candidate
 	for _, path := range findCodexSessionRollouts(root, threadID) {
 		info, err := os.Stat(path)
-		if err != nil || info.ModTime().Before(startTime) {
+		if err != nil || (!startTime.IsZero() && info.ModTime().Before(startTime)) {
 			continue
 		}
 		files = append(files, candidate{path: path, modTime: info.ModTime()})
 	}
 	if len(files) == 0 {
-		return nil
+		return ""
 	}
 	sort.Slice(files, func(i, j int) bool {
 		if files[i].modTime.Equal(files[j].modTime) {
@@ -3980,16 +3981,81 @@ func scanCodexSessionUsage(startTime time.Time, codexHome, threadID string, resu
 		}
 		return files[i].modTime.Before(files[j].modTime)
 	})
+	return files[len(files)-1].path
+}
 
-	// Multiple paths for one thread can transiently exist during layout migration.
-	// They have the same owner, so prefer the latest deterministically without ever
-	// crossing into a different thread's rollout.
-	result := parseCodexSessionFileSince(files[len(files)-1].path, startTime, resumed)
+func scanCodexSessionUsage(startTime time.Time, codexHome, threadID string, resumed bool) *codexSessionUsage {
+	root := codexSessionRoot(codexHome)
+	if root == "" || strings.TrimSpace(threadID) == "" {
+		return nil
+	}
+	path := latestCodexSessionRollout(root, threadID, startTime)
+	if path == "" {
+		return nil
+	}
+	result := parseCodexSessionFileSince(path, startTime, resumed)
 	if result == nil || (result.usage.InputTokens == 0 && result.usage.OutputTokens == 0 &&
 		result.usage.CacheReadTokens == 0 && result.usage.CacheWriteTokens == 0) {
 		return nil
 	}
 	return result
+}
+
+// codexSessionModel 只读模型名，不读用量。
+//
+// 它必须和 scanCodexSessionUsage 分开，因为**两者的可得性不同**：
+//
+//   - 用量有两条路：JSON-RPC 通知，或会话文件里的 token_count 事件。
+//   - 模型名只有一条路：会话文件（turn_context 的 payload.model，或 token_count 的
+//     info.model）。JSON-RPC 通知**不带**模型名。
+//
+// 所以模型名绝不能挂在「用量走了文件那条路」的分支上——一旦 JSON-RPC 报了用量，那条
+// 分支就不走，模型名永远是空的，用量行退化成字面量 `unknown`，进而在四态成本口径里
+// 变成 `unpriced`（既不能显示，也不能进中位数与预算）。见 ruel #32。
+func codexSessionModel(startTime time.Time, codexHome, threadID string) string {
+	root := codexSessionRoot(codexHome)
+	if root == "" || strings.TrimSpace(threadID) == "" {
+		return ""
+	}
+	path := latestCodexSessionRollout(root, threadID, startTime)
+	if path == "" {
+		return ""
+	}
+	return parseCodexSessionModel(path)
+}
+
+// parseCodexSessionModel 扫一个 rollout 文件，取最后出现的模型名。
+//
+// 取最后一条而不是第一条：一次 Run 里模型可以被换掉（用户中途切模型），最后一个才是
+// 这一轮真正在跑的那个。用量是累计的，它对应的是**最后**那个模型的价格结构。
+func parseCodexSessionModel(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	model := ""
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if !bytesContainsStr(line, "turn_context") && !bytesContainsStr(line, "token_count") {
+			continue
+		}
+		var evt codexSessionTokenCount
+		if err := json.Unmarshal(line, &evt); err != nil || evt.Payload == nil {
+			continue
+		}
+		if evt.Payload.Model != "" {
+			model = evt.Payload.Model
+			continue
+		}
+		if evt.Payload.Info != nil && evt.Payload.Info.Model != "" {
+			model = evt.Payload.Info.Model
+		}
+	}
+	return model
 }
 
 // findCodexSessionRollouts returns uncompressed rollout files owned by threadID
@@ -4194,9 +4260,11 @@ func parseCodexSessionFileSince(path string, startTime time.Time, resumed bool) 
 			afterStartBoundary = true
 		}
 
-		// Track model from turn_context events.
+		// A turn_context line carries the model name and never any token
+		// usage; skip it. Reading the model now has its own pass over
+		// the file (parseCodexSessionModel), because the model is
+		// available even when this usage path is not taken - ruel #32.
 		if evt.Type == "turn_context" && evt.Payload.Model != "" {
-			result.model = evt.Payload.Model
 			continue
 		}
 
@@ -4222,9 +4290,6 @@ func parseCodexSessionFileSince(path string, startTime time.Time, resumed bool) 
 				// fallback the old whole-file parser would have selected.
 				finalUsage = normalizeCodexRawTokenUsage(*usage)
 				finalUsageFound = true
-			}
-			if evt.Payload.Info.Model != "" {
-				result.model = evt.Payload.Info.Model
 			}
 		}
 	}
