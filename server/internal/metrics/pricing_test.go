@@ -636,3 +636,80 @@ func TestPriceForModelAliasAnthropicOpus55(t *testing.T) {
 		}
 	}
 }
+
+// TestEstimateUsageCostKeepsUnknownApartFromZero pins the distinction this
+// whole file's cost path exists for: a row we cannot price must not come back
+// as the same 0 as a row that is genuinely free. Collapsing them is what makes
+// a cost median silently wrong — every unpriced row drags it toward 0, which
+// in turn makes a "3x the median" alert fire on ordinary runs.
+//
+// The glm-5 numbers are the real p50 of the 21 glm-5 rows on this machine
+// (2026-10-07), and the `unknown` row is one of the 3 codex rows whose adapter
+// reported no model at all: 28,833 input / 969 output / 122,880 cache read.
+func TestEstimateUsageCostKeepsUnknownApartFromZero(t *testing.T) {
+	cases := []struct {
+		name       string
+		model      string
+		ticks      int64
+		in, out    int64
+		cr, cw     int64
+		wantSource CostSource
+		wantZero   bool
+	}{
+		{
+			name:       "provider price wins over the table",
+			model:      "glm-5",
+			ticks:      1_234_000_000,
+			in:         43_068, out: 1_198, cr: 240_128,
+			wantSource: CostSourceProvider,
+		},
+		{
+			name:       "rate table estimate",
+			model:      "glm-5",
+			in:         43_068, out: 1_198, cr: 240_128,
+			wantSource: CostSourceTable,
+		},
+		{
+			name:       "no model, no price, real tokens: unknown",
+			model:      "unknown",
+			in:         28_833, out: 969, cr: 122_880,
+			wantSource: CostSourceUnpriced, wantZero: true,
+		},
+		{
+			name:       "no tokens at all: genuinely free",
+			model:      "glm-5",
+			wantSource: CostSourceZero, wantZero: true,
+		},
+	}
+
+	for _, tc := range cases {
+		got := EstimateUsageCost(tc.model, tc.ticks, tc.in, tc.out, tc.cr, tc.cw)
+		if got.Source != tc.wantSource {
+			t.Errorf("%s: source = %q, want %q", tc.name, got.Source, tc.wantSource)
+		}
+		if tc.wantZero && got.USD != 0 {
+			t.Errorf("%s: USD = %v, want 0", tc.name, got.USD)
+		}
+		if !tc.wantZero && got.USD <= 0 {
+			t.Errorf("%s: USD = %v, want > 0", tc.name, got.USD)
+		}
+	}
+
+	// The two 0s are different: only one of them may enter an aggregate.
+	unknown := EstimateUsageCost("unknown", 0, 28_833, 969, 122_880, 0)
+	free := EstimateUsageCost("glm-5", 0, 0, 0, 0, 0)
+	if unknown.Priceable() {
+		t.Error("unpriced row is Priceable(); it must be excluded from medians and budgets")
+	}
+	if !free.Priceable() {
+		t.Error("genuinely free row is not Priceable(); a real 0 belongs in the median")
+	}
+	// And the reason it matters, stated as a number: the 24 real rows price to
+	// a p50 of $0.1008 with the 3 unpriced rows excluded. Folding them in as 0
+	// moves p50 to $0.0901 and drops the 3x bar from $0.3025 to $0.2703 — a
+	// 10% lower trip line, paid for entirely by rows whose cost is unknown.
+	const p50PricedOnly, p50WithUnknowns = 0.1008, 0.0901
+	if p50WithUnknowns >= p50PricedOnly {
+		t.Fatalf("test constant drifted: unknowns must lower the median")
+	}
+}

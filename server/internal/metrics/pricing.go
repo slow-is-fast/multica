@@ -296,3 +296,77 @@ func tokenCostUSD(tokens int64, pricePerM float64) float64 {
 	}
 	return float64(tokens) * pricePerM / 1_000_000
 }
+
+// CostSource says where a usage row's converted cost came from.
+//
+// The whole point of this enum is one distinction: `unpriced` means "we do
+// not know what this cost", which is NOT "this cost nothing". A usage row
+// whose model has no rate and whose provider reported no price has an unknown
+// cost — rendering it as $0.00 tells the user the run was free, and worse,
+// feeds a 0 into any median or budget computed over it. Those two outcomes
+// are the reason the states are separate rather than two spellings of 0.
+type CostSource string
+
+const (
+	// CostSourceProvider: the runtime charged the turn itself
+	// (`providerTicks > 0`). Authoritative — no estimate can improve on it.
+	CostSourceProvider CostSource = "provider"
+	// CostSourceTable: no provider price, but the rate table knows the model.
+	// An estimate, and the only kind of cost most runtimes will ever have.
+	CostSourceTable CostSource = "table"
+	// CostSourceZero: priced, and genuinely free. Either nothing was consumed
+	// (no tokens at all) or the model's rates are all 0 (a free tier). Safe
+	// to show as $0.00 and safe to feed into a median.
+	CostSourceZero CostSource = "zero"
+	// CostSourceUnpriced: tokens were consumed, nobody reported a price, and
+	// the rate table does not know the model. MUST NOT be shown as a number
+	// and MUST NOT enter an aggregate — surface it as "cannot be priced"
+	// alongside the token count it applies to.
+	CostSourceUnpriced CostSource = "unpriced"
+)
+
+// UsageCost is one usage row converted to USD, with the state that says
+// whether the number means anything.
+type UsageCost struct {
+	USD    float64
+	Source CostSource
+}
+
+// Priceable reports whether `c` carries a real number a caller may display
+// and aggregate. `unpriced` is the one state that does not.
+func (c UsageCost) Priceable() bool {
+	return c.Source != CostSourceUnpriced
+}
+
+// EstimateUsageCost converts a usage row to USD, preferring the provider's own
+// price and falling back to the rate table.
+//
+// Precedence mirrors estimateCost in packages/views/runtimes/utils.ts so the
+// server-side derivation and the dashboard agree on one row. The two differ in
+// one place on purpose: the client has no "unpriced" state and returns a plain
+// number, leaving the caller to notice that a row with tokens priced to 0. The
+// enum here exists so that noticing is not optional.
+func EstimateUsageCost(model string, providerTicks, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int64) UsageCost {
+	if providerTicks > 0 {
+		return UsageCost{USD: float64(providerTicks) / CostUSDTicksPerUSD, Source: CostSourceProvider}
+	}
+	total := inputTokens + outputTokens + cacheReadTokens + cacheWriteTokens
+	if total <= 0 {
+		// Nothing was consumed. This really is free, not unknown.
+		return UsageCost{USD: 0, Source: CostSourceZero}
+	}
+	price, ok := PriceForModelAlias(model)
+	if !ok {
+		return UsageCost{USD: 0, Source: CostSourceUnpriced}
+	}
+	usd := tokenCostUSD(inputTokens, price.InputPerM) +
+		tokenCostUSD(outputTokens, price.OutputPerM) +
+		tokenCostUSD(cacheReadTokens, price.CacheReadPerM) +
+		tokenCostUSD(cacheWriteTokens, price.CacheWritePerM)
+	if usd <= 0 {
+		// Rates are known and they are all 0 (a free tier). Known-free, not
+		// unknown — it belongs in a median as a real 0.
+		return UsageCost{USD: 0, Source: CostSourceZero}
+	}
+	return UsageCost{USD: usd, Source: CostSourceTable}
+}
