@@ -666,6 +666,19 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 		}
 		return commit()
 	}
+	// Ruel 新增：成本预算闸门（见 ruel_delegation_budget.go）。同样用 pause 收尾。
+	if err := s.Tasks.ruelGuardDelegationBudget(ctx, delegatedFrom, issue.ID, agent.ID, "issue_wakeup_system"); err != nil {
+		if err = q.PauseIssueWakeup(ctx, db.PauseIssueWakeupParams{ID: w.ID, PausedReason: pgtype.Text{String: wakeupPausedDelegationBudget, Valid: true}, BlockRuns: true}); err != nil {
+			return err
+		}
+		if err = q.DiscardWakeupReceipts(ctx, w.ID); err != nil {
+			return err
+		}
+		if err = note(wakeupActivityPaused, map[string]any{"rule": SystemRuleChildDone, "reason": wakeupPausedDelegationBudget, "budget_usd": ruelDelegationBudgetUSD}); err != nil {
+			return err
+		}
+		return commit()
+	}
 	contextJSON, _ := json.Marshal(map[string]any{"wakeup_id": util.UUIDToString(w.ID), "wakeup_revision": w.Revision, "wakeup_evidence": evidence, "wakeup_system": SystemRuleChildDone})
 	task, err = q.CreateWakeupTask(ctx, db.CreateWakeupTaskParams{
 		ID: dbid.NewV7(), AgentID: agent.ID, RuntimeID: agent.RuntimeID, IssueID: issue.ID, Priority: priorityToInt(issue.Priority),

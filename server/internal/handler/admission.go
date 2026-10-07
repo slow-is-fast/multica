@@ -71,6 +71,8 @@ const (
 	ReasonInternalError         = dispatch.ReasonInternalError
 	// Ruel 新增：委派链到了深度上限，见 dispatch.ReasonDelegationDepthExceeded。
 	ReasonDelegationDepthExceeded = dispatch.ReasonDelegationDepthExceeded
+	// Ruel 新增：委派链的成本预算耗尽，见 dispatch.ReasonDelegationBudgetExceeded。
+	ReasonDelegationBudgetExceeded = dispatch.ReasonDelegationBudgetExceeded
 )
 
 // DispatchTarget is the caller-visible reference to an execution target. Name

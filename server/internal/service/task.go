@@ -1294,6 +1294,12 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	if err := s.ruelGuardDelegationDepth(ctx, attrDelegatedFrom, issue.ID, issue.AssigneeID, "enqueue_issue_task"); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
+	// Ruel 新增：成本预算闸门（见 ruel_delegation_budget.go）。排在深度闸门之后——深度
+	// 只走一条链，预算要扫这条 Issue 上全部用量行，便宜的那个先判。
+	// 两个维度独立，任一触限即停：深度封代数，预算封总量（扇出是深度管不住的形状）。
+	if err := s.ruelGuardDelegationBudget(ctx, attrDelegatedFrom, issue.ID, issue.AssigneeID, "enqueue_issue_task"); err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 	createParams := db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              issue.AssigneeID,
@@ -1467,6 +1473,10 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	// Ruel 新增：委派链深度闸门（见 ruel_delegation_depth.go）。
 	if err := s.ruelGuardDelegationDepth(ctx, attrDelegatedFrom, issue.ID, agentID, "enqueue_mention_task"); err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	// Ruel 新增：成本预算闸门（见 ruel_delegation_budget.go）。
+	if err := s.ruelGuardDelegationBudget(ctx, attrDelegatedFrom, issue.ID, agentID, "enqueue_mention_task"); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
@@ -6662,6 +6672,11 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 		// —— 链到头了，不该再转。交给 exhaustDelegatedFailureRecovery 走它自己的终态
 		// （发帖说明为什么不会再跑），比让调用方拿到一个它不认识的错误要好。
 		if err := s.ruelGuardDelegationDepth(ctx, target.failed.ID, target.issue.ID, target.agent.ID, "delegated_failure_recovery"); err != nil {
+			return delegatedFailureRecoveryCovered, nil
+		}
+		// Ruel 新增：成本预算闸门（见 ruel_delegation_budget.go）。同样排在次数预算之后，
+		// 同样不返回 error——预算耗尽也是**有结论**，交给 exhaust 走它自己的终态。
+		if err := s.ruelGuardDelegationBudget(ctx, target.failed.ID, target.issue.ID, target.agent.ID, "delegated_failure_recovery"); err != nil {
 			return delegatedFailureRecoveryCovered, nil
 		}
 		task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{

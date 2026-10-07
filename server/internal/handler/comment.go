@@ -2348,6 +2348,10 @@ func commentEnqueueFailureReason(err error) DispatchReasonCode {
 	if errors.Is(err, service.ErrDelegationDepthExceeded) {
 		return ReasonDelegationDepthExceeded
 	}
+	// 预算闸门同样是 service 层的唯一收口，拒绝同样要翻译成 reason code 回到调用方。
+	if errors.Is(err, service.ErrDelegationBudgetExceeded) {
+		return ReasonDelegationBudgetExceeded
+	}
 	return ReasonInternalError
 }
 

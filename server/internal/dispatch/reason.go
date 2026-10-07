@@ -102,6 +102,19 @@ const (
 	// 做的是把链断开或让人接手。跟 already_active 也分开——那是一条 Run 正在跑，这里是
 	// 一条链跑太久了。
 	ReasonDelegationDepthExceeded ReasonCode = "delegation_depth_exceeded"
+	// ReasonDelegationBudgetExceeded: Ruel 新增。这条 Issue 上累计的折算成本已经到预算，
+	// 拒绝再转一次手（见 service/ruel_delegation_budget.go）。
+	//
+	// 与 delegation_depth_exceeded 分开，是因为**两件事各自独立，修法也不同**：
+	//   - 深度是「转手次数」维度，封的是代数；换一条链就归零。
+	//   - 预算是「钱」维度，封的是总量；per_issue 累计不会归零，撞上一次就是永久的，
+	//     要人先解释那笔钱花在哪。
+	//
+	// 两者任一触限即停，但**不合并成一个「综合分」**——合并之后没人说得清到底是因为
+	// 什么停的，也就没法决定该改哪个上限。
+	//
+	// 与 quota_exceeded 也分开：那个是 Cloud 的 autopilot 区间配额，这里是本机折算成本。
+	ReasonDelegationBudgetExceeded ReasonCode = "delegation_budget_exceeded"
 	// ReasonQuotaExceeded is a policy-neutral refusal for an exhausted
 	// Cloud-provided autopilot interval.
 	ReasonQuotaExceeded ReasonCode = "quota_exceeded"

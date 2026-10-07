@@ -1074,6 +1074,21 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 		}
 		return commit()
 	}
+	// Ruel 新增：成本预算闸门（见 ruel_delegation_budget.go）。同样用 pause 收尾，而且
+	// 比深度那条更该暂停——深度换条链就归零，per_issue 的累计**不会**自己归零，超一次
+	// 就是永远超。
+	if err := s.Tasks.ruelGuardDelegationBudget(ctx, w.SourceTaskID, w.IssueID, w.AgentID, "issue_wakeup"); err != nil {
+		if err = q.PauseIssueWakeup(ctx, db.PauseIssueWakeupParams{ID: w.ID, PausedReason: pgtype.Text{String: wakeupPausedDelegationBudget, Valid: true}, BlockRuns: true}); err != nil {
+			return err
+		}
+		if err = q.DiscardWakeupReceipts(ctx, w.ID); err != nil {
+			return err
+		}
+		if err = note(wakeupActivityPaused, map[string]any{"reason": wakeupPausedDelegationBudget, "budget_usd": ruelDelegationBudgetUSD}); err != nil {
+			return err
+		}
+		return commit()
+	}
 	noteText, evidence := mergeWakeupEvidence(w, task, receipts)
 	if taskExists {
 		task, err = q.ReplaceWakeupEvidence(ctx, db.ReplaceWakeupEvidenceParams{ID: task.ID, HandoffNote: pgtype.Text{String: noteText, Valid: true}, WakeupEvidence: evidence})

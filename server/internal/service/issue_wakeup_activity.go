@@ -32,6 +32,10 @@ const (
 	// 上，它起的每一个 Run 都会再转一次手，所以不是「这次跳过」而是「永远不许起」——
 	// 见 issue_wakeup.go 里的闸门与 ruel_delegation_depth.go。
 	wakeupPausedDelegationDepth = "delegation_depth"
+	// wakeupPausedDelegationBudget: 委派链的成本预算耗尽（见 ruel_delegation_budget.go）。
+	// 与深度那条分开记，因为**出路不同**：深度耗尽可以换一条链重来，预算是 per_issue
+	// 累计、不会归零，恢复了也会立刻再撞上——要人先解释那笔钱花在哪。
+	wakeupPausedDelegationBudget = "delegation_budget"
 	wakeupTimeoutEventType   = "wakeup.timeout"
 	wakeupManualEventType    = "wakeup.manual"
 	wakeupConditionEventType = "condition.met"
