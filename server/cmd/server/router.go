@@ -1679,6 +1679,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/upload-file", h.UploadFile)
 		r.Post("/api/feedback", h.CreateFeedback)
 		r.With(handler.RequireHumanActor).Post("/api/client-usage", h.UpsertClientUsage)
+		// Ruel 新增：两个进程内累计的可观测端点。都只要求登录——它们回答的是「这台服务
+		// 此刻有没有在漏」，不含任何 workspace 的资源。
+		//   /api/usage-completeness  用量行的模型名采集完整度（#34）
+		//   /api/gate-refusals       委派链闸门拒绝的事务外回执（#33）
+		r.Get("/api/usage-completeness", h.GetUsageCompleteness)
+		r.Get("/api/gate-refusals", h.GetGateRefusals)
 
 		// Note (MUL-4309): the generic OpenAI-compatible passthrough endpoints
 		// (POST /api/llm/v1/chat/completions[/stream]) were intentionally

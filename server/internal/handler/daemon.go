@@ -4924,6 +4924,12 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("upsert task usage failed", "task_id", taskID, "model", u.Model, "error", err)
 			continue
 		}
+		// Ruel 新增：模型名采集完整性（#34）。只在**写库成功之后**计数——写失败的这一行
+		// 根本不存在，把它算进分母会让「采没采到」和「写没写进去」混成一个数。
+		//
+		// 分母就是这里：能走到这一步的每一行都是一条用量记录。没有用量记录的行根本不会
+		// 出现在这个请求里，那是另一类问题（Run 没报用量），不要并进来。
+		obsmetrics.DefaultModelCompleteness.Observe(provider, u.Model)
 		h.TaskService.CaptureTaskUsage(r.Context(), task, provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.CostUSDTicks)
 
 		// Surface prompt-cache effectiveness per run so cache hit rates are

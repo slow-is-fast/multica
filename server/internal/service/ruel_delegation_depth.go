@@ -29,6 +29,8 @@ import (
 	"errors"
 	"log/slog"
 
+	"github.com/multica-ai/multica/server/internal/gaterefusal"
+
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -96,5 +98,17 @@ func (s *TaskService) ruelGuardDelegationDepth(ctx context.Context, parentTaskID
 		"depth", depth,
 		"limit", RuelDelegationDepthLimit,
 	)
+	// Ruel 新增：把拒绝记到事务之外（#33）。这一行必须在 `return Err...` 之前，而且不能
+	// 依赖调用方——调用方拿到这个 error 之后要回滚事务，写在事务里的任何东西都会消失。
+	limit := RuelDelegationDepthLimit
+	gaterefusal.Record(gaterefusal.Notice{
+		Dimension:    gaterefusal.DimensionDepth,
+		Path:         path,
+		IssueID:      util.UUIDToString(issueID),
+		AgentID:      util.UUIDToString(agentID),
+		ParentTaskID: util.UUIDToString(parentTaskID),
+		Depth:        &depth,
+		DepthLimit:   &limit,
+	})
 	return ErrDelegationDepthExceeded
 }

@@ -30,6 +30,7 @@ import (
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/gaterefusal"
 	"github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -153,5 +154,26 @@ func (s *TaskService) ruelGuardDelegationBudget(ctx context.Context, parentTaskI
 		"priced_rows", acc.PricedRows,
 		"unpriced_rows", acc.UnpricedRows,
 	)
+	// Ruel 新增：把拒绝记到事务之外（#33）。理由同深度闸门那条；这一条比深度更该被看见，
+	// 因为 per_issue 的累计不会自己归零——撞上一次就是这个 Issue 永久封住。
+	//
+	// 四个数字全部带上，一个都不能省：已花 / 上限决定要不要调预算，priced_rows 决定这个
+	// 判定有多少依据，**unpriced_rows 决定这个判定有多瞎**——算不出来的行数越多，「已花」
+	// 越是个下限。藏掉它，人会把一个下限读成实际值。
+	spentUSD := acc.PricedUSD
+	budgetUSD := float64(RuelDelegationBudgetTicks) / metrics.CostUSDTicksPerUSD
+	pricedRows := acc.PricedRows
+	unpricedRows := acc.UnpricedRows
+	gaterefusal.Record(gaterefusal.Notice{
+		Dimension:    gaterefusal.DimensionBudget,
+		Path:         path,
+		IssueID:      util.UUIDToString(issueID),
+		AgentID:      util.UUIDToString(agentID),
+		ParentTaskID: util.UUIDToString(parentTaskID),
+		SpentUSD:     &spentUSD,
+		BudgetUSD:    &budgetUSD,
+		PricedRows:   &pricedRows,
+		UnpricedRows: &unpricedRows,
+	})
 	return ErrDelegationBudgetExceeded
 }

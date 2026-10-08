@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/gaterefusal"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -417,6 +418,10 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	// Ruel 新增：保留策略（P0-9 的另一半）。同样放在 daemon 进程里：生效 TTL 只能从
 	// daemon 已经装载的 cfg 读，CLI 自己按默认值拼一遍就是拿默认值冒充生效值。
 	mux.HandleFunc("/gc-policy", d.gcPolicyHandler())
+	// Ruel 新增：闸门拒绝的回执（#33）。与上面两条同样放在 daemon 进程里，理由更硬：
+	// wakeup 触发的那几条委派入口在这个进程里拒绝，而拒绝发生后事务会回滚，库里不留
+	// 痕迹——回执只可能在**发生拒绝的那个进程**里问到。
+	mux.HandleFunc("/gate-refusals", d.gateRefusalsHandler())
 
 	srv := &http.Server{Handler: mux}
 
@@ -468,6 +473,27 @@ func (d *Daemon) gcPolicyHandler() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(report); err != nil {
 			d.logger.Warn("gc-policy: write response failed", "error", err)
+		}
+	}
+}
+
+// gateRefusalsHandler 应答闸门拒绝的回执（#33）。
+//
+// 只读。回执本身由 `internal/gaterefusal` 在事务之外记录，这里只是把它读出来——
+// 所以它能查到那些**事务已经回滚、库里一行痕迹都没有**的拒绝。
+func (d *Daemon) gateRefusalsHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]any{
+			"generated_at": time.Now().UTC(),
+			"process":      "daemon",
+			"notices":      gaterefusal.Snapshot(),
+		}); err != nil {
+			d.logger.Warn("gate-refusals: write response failed", "error", err)
 		}
 	}
 }
