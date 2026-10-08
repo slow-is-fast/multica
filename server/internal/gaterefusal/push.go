@@ -256,11 +256,14 @@ func (p *Pusher) nextWakeup() time.Duration {
 // deliverDue 把所有到期的条目串行投出去。
 func (p *Pusher) deliverDue(ctx context.Context) {
 	for {
-		item := p.takeDue()
-		if item == nil {
+		// 先看 ctx：**先出队再判断**会把条目取出来又扔掉，退出时补投就少投了。
+		// （实测踩过：ctx 已取消时 timer 也到期，select 随机选到 timer，两条拒绝被
+		// 取出后丢弃，drainBestEffort 只剩空队列。）
+		if ctx.Err() != nil {
 			return
 		}
-		if ctx.Err() != nil {
+		item := p.takeDue()
+		if item == nil {
 			return
 		}
 		attempt := item.attempts + 1
