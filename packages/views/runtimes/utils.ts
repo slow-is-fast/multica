@@ -286,14 +286,22 @@ const MODEL_PRICING: Record<
   //    The official catalog lists exactly two current SKUs; `deepseek-chat`
   //    and `deepseek-reasoner` are aliases that route to `deepseek-v4-flash`
   //    (non-thinking and thinking mode respectively) per the same page.
-  //    `deepseek-v4-pro` is currently under a 75%-off promo that ends
-  //    2026-05-31 15:59 UTC; we price at the post-promo standard rate
-  //    ($1.74/$3.48) so the dashboard does not jump 4× on June 1 — accept
-  //    a brief over-estimate during the promo over a sudden cliff after it. --
-  "deepseek-v4-flash":  { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
+  //    Both SKUs are under a 75%-off promo that ends 2026-05-31 15:59 UTC;
+  //    we price at the post-promo standard rate ($1.74/$3.48 for pro,
+  //    $0.56/$1.12 for flash) so the dashboard does not jump 4× on June 1 —
+  //    accept a brief over-estimate during the promo over a sudden cliff
+  //    after it.
+  //
+  //    The flash row used to carry $0.14/$0.28 — exactly the promo price
+  //    (a quarter of standard) — while the sibling pro row carried the
+  //    post-promo rate this comment has always asked for. Same table, two
+  //    policies, and no way to notice. Corrected to match the server table
+  //    in server/internal/metrics/pricing.go, which is the side that drives
+  //    budget gates; TestFrontendPricingMatchesServerOnSharedRows now pins the overlap. --
+  "deepseek-v4-flash":  { input: 0.56, output: 1.12, cacheRead: 0.0112, cacheWrite: 0.56 },
   "deepseek-v4-pro":    { input: 1.74, output: 3.48, cacheRead: 0.0145, cacheWrite: 1.74 },
-  "deepseek-chat":      { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
-  "deepseek-reasoner":  { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
+  "deepseek-chat":      { input: 0.56, output: 1.12, cacheRead: 0.0112, cacheWrite: 0.56 },
+  "deepseek-reasoner":  { input: 0.56, output: 1.12, cacheRead: 0.0112, cacheWrite: 0.56 },
 
   // -- Moonshot Kimi (kimi.com/resources/kimi-k2-6-pricing).
   //    Only K2.6 is on the official price sheet today; earlier K2 variants
