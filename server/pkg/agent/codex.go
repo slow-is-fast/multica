@@ -4013,15 +4013,35 @@ func scanCodexSessionUsage(startTime time.Time, codexHome, threadID string, resu
 // 分支就不走，模型名永远是空的，用量行退化成字面量 `unknown`，进而在四态成本口径里
 // 变成 `unpriced`（既不能显示，也不能进中位数与预算）。见 ruel #32。
 func codexSessionModel(startTime time.Time, codexHome, threadID string) string {
+	model, _ := codexSessionModelAt(startTime, codexHome, threadID)
+	return model
+}
+
+// codexSessionModelAt 与 codexSessionModel 一样读模型名，但把据以判断的 rollout
+// 路径一并返回，供离线修复工具写进 dry-run 报告与审计日志：改历史用量这种动作，
+// 必须能回答「这个模型名是从哪个文件读出来的」。
+func codexSessionModelAt(startTime time.Time, codexHome, threadID string) (string, string) {
 	root := codexSessionRoot(codexHome)
 	if root == "" || strings.TrimSpace(threadID) == "" {
-		return ""
+		return "", ""
 	}
 	path := latestCodexSessionRollout(root, threadID, startTime)
 	if path == "" {
-		return ""
+		return "", ""
 	}
-	return parseCodexSessionModel(path)
+	return parseCodexSessionModel(path), path
+}
+
+// CodexSessionModel 是上面那个解析器的导出入口。
+//
+// 它存在的唯一理由：离线回填工具（cmd/backfill_codex_usage_model，ruel #35）必须
+// 复用**同一份** rollout 解析逻辑。回填是在改写已经落库的历史用量，如果工具自己
+// 再写一遍解析，两处迟早在 rollout 格式上分叉——那时候被改错的是历史账单，而且
+// 没有任何信号会说「这两处算得不一样」。
+//
+// 返回 (模型名, rollout 路径)。读不到就都返回空串，调用方不得据此编造一个值。
+func CodexSessionModel(startTime time.Time, codexHome, threadID string) (string, string) {
+	return codexSessionModelAt(startTime, codexHome, threadID)
 }
 
 // parseCodexSessionModel 扫一个 rollout 文件，取最后出现的模型名。
