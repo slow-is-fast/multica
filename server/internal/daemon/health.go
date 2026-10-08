@@ -492,6 +492,7 @@ func (d *Daemon) gateRefusalsHandler() http.HandlerFunc {
 			"generated_at": time.Now().UTC(),
 			"process":      "daemon",
 			"notices":      gaterefusal.Snapshot(),
+			"push":         gaterefusal.PushStatusSnapshot(),
 		}); err != nil {
 			d.logger.Warn("gate-refusals: write response failed", "error", err)
 		}

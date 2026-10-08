@@ -151,7 +151,12 @@ Refusals are recorded by whichever process refused — comment-triggered delegat
 runs in the API server, wakeup-triggered delegation runs in the daemon. This command
 asks both and labels which side each row came from.
 
-Counts live in process memory and reset on restart.`,
+Counts live in process memory and reset on restart.
+
+The report also includes the webhook push channel (#36): whether it is configured,
+how many refusals were delivered, and how many were dropped after exhausting their
+retries. An unconfigured channel is reported as such rather than omitted — a push
+channel that fails silently is worse than no channel at all.`,
 	RunE: runGateRefusals,
 }
 
@@ -208,6 +213,20 @@ type gateRefusalsReport struct {
 	GeneratedAt time.Time          `json:"generated_at"`
 	Process     string             `json:"process"`
 	Notices     []gateRefusalEntry `json:"notices"`
+	Push        gateRefusalsPush   `json:"push"`
+}
+
+// gateRefusalsPush 是推送通道的自检面（#36）。
+type gateRefusalsPush struct {
+	Configured bool   `json:"configured"`
+	URL        string `json:"url,omitempty"`
+	Process    string `json:"process,omitempty"`
+	Pending    int    `json:"pending"`
+	Delivered  int64  `json:"delivered"`
+	Dropped    int64  `json:"dropped"`
+	Attempts   int64  `json:"attempts"`
+	LastError  string `json:"last_error,omitempty"`
+	LastAt     string `json:"last_at,omitempty"`
 }
 
 type gateRefusalEntry struct {
@@ -252,6 +271,7 @@ func printGateRefusalsTable(out io.Writer, reports []gateRefusalsReport) {
 	if total == 0 {
 		fmt.Fprintf(out, "没有任何拒绝记录。\n")
 		fmt.Fprintf(out, "注意：累计是进程内的，服务重启即清零；且只含**当前运行的进程**见到的拒绝。\n")
+		printGatePushStatus(out, reports)
 		return
 	}
 
@@ -274,6 +294,45 @@ func printGateRefusalsTable(out io.Writer, reports []gateRefusalsReport) {
 		fmt.Fprintf(os.Stderr, "gate-refusals: 渲染表格失败: %v\n", err)
 	}
 	fmt.Fprintf(out, "\n深度耗尽可以换一条链重来；预算是 per_issue 累计，不会自己归零。\n")
+	printGatePushStatus(out, reports)
+}
+
+// printGatePushStatus 打印推送通道的自检面。
+//
+// 这一段必须**在没有拒绝时也照常打印**：「未配置」本身是一个要让人看见的答案。
+// 一个配错 URL 却什么都不显示的推送通道，比没有通道更糟——它让人以为有人在看着。
+func printGatePushStatus(out io.Writer, reports []gateRefusalsReport) {
+	fmt.Fprintf(out, "\n推送通道（#36）\n")
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "来源\t状态\t目标\t待投\t已投\t丢弃\t最后一次错误")
+	for _, r := range reports {
+		state := "未配置"
+		if r.Push.Configured {
+			state = "已配置"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%d\t%d\t%s\n",
+			r.Source, state, pushTargetLabel(r.Push),
+			r.Push.Pending, r.Push.Delivered, r.Push.Dropped, pushErrorLabel(r.Push))
+	}
+	if err := tw.Flush(); err != nil {
+		fmt.Fprintf(os.Stderr, "gate-refusals: 渲染推送状态失败: %v\n", err)
+	}
+	fmt.Fprintf(out, "未配置时不起 goroutine、不产生流量，回执端点照常工作。\n")
+	fmt.Fprintf(out, "丢弃 = 重试到上限后放弃；进程重启会丢掉没投出去的条目，这是有意的取舍。\n")
+}
+
+func pushTargetLabel(p gateRefusalsPush) string {
+	if !p.Configured || p.URL == "" {
+		return "—"
+	}
+	return p.URL
+}
+
+func pushErrorLabel(p gateRefusalsPush) string {
+	if p.LastError == "" {
+		return "—"
+	}
+	return p.LastError
 }
 
 // gateRefusalDimensionLabel 两个维度在表里要能一眼分开：它们的出路不一样。

@@ -9,14 +9,15 @@
 // 本包把回执记在**进程内**，因此与事务无关：无论调用方最后是 commit 还是 rollback，回执
 // 都已经在了。
 //
-// ## 为什么是「回执」而不是「推送」
+// ## 为什么先是「回执」，推送是后来的事
 //
 // 拒绝发生时我们处在一笔即将回滚的事务中间，既不能写库，也不该在事务里发外部请求
-// （请求成功、事务回滚，就变成一条指向不存在的拒绝的通知）。所以这里是**可查询的回执**：
-// 人问一句就有，而不是主动弹到面前。
+// （请求成功、事务回滚，就变成一条指向不存在的拒绝的通知）。所以 #33 先做的是**可查询
+// 的回执**：人问一句就有，而不是主动弹到面前。
 //
-// 推送需要一条事务外的投递通道（webhook / 邮件 / Issue 评论），这条通道在本机还不存在，
-// 不在这里假装有。见 Issue #33 的遗留。
+// 推送那条事务外的投递通道由 #36 补上（见 push.go）：配一个 webhook，Record 顺手往内存
+// 队列丢一条，事务外的 goroutine 去投。两层是分开的——回执回答「刚才发生了什么」，推送
+// 回答「没人问的时候也要让人知道」。
 //
 // ## 一个必须说清的边界
 //
@@ -129,11 +130,26 @@ func Record(n Notice) {
 		if n.UnpricedRows != nil {
 			existing.UnpricedRows = n.UnpricedRows
 		}
+		// 合并进来的那一次也是一次拒绝，推的是**合并后**的状态（Count 已 +1），
+		// 接收方因此看得到「这一小段时间里撞了几回」。
+		notifyPush(*existing)
 		return
 	}
 	notices = append(notices, &n)
 	if len(notices) > maxNotices {
 		notices = notices[len(notices)-maxNotices:]
+	}
+	notifyPush(n)
+}
+
+// notifyPush 是 Record 与推送通道之间唯一的接缝（#36）。
+//
+// 它必须在**持有 notices 的锁、事务之外**被调用：闸门拒绝后调用方会回滚，而队列在
+// 进程内存里，回滚带不走它。反过来，这里绝不能碰数据库或发网络请求——它会跑在闸门
+// 的返回路径上。
+func notifyPush(n Notice) {
+	if p := currentPusher(); p != nil {
+		p.Enqueue(n)
 	}
 }
 

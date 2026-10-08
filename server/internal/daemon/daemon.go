@@ -30,6 +30,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/gaterefusal"
 	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -2142,6 +2143,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// "starting" until d.ready is set after preflight, so a slow or *failing*
 	// preflight is never misreported as a started daemon. resolveAuth has
 	// already run, so a missing token still fails fast before we begin serving.
+	// 闸门拒绝的推送通道（#36）。wakeup 触发的委派走 daemon 进程，所以这一侧也要起
+	// 自己的投递器；未配置时返回空操作，不起 goroutine。
+	stopGatePush := gaterefusal.StartPushFromEnv(ctx, "daemon", d.logger)
+	defer stopGatePush()
+
 	go d.serveHealth(ctx, healthLn, time.Now())
 
 	// Renew the PAT before the first API call, then do the initial

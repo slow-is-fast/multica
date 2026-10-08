@@ -23,5 +23,7 @@ func (h *Handler) GetGateRefusals(w http.ResponseWriter, r *http.Request) {
 		"generated_at": time.Now().UTC(),
 		"process":      "api",
 		"notices":      gaterefusal.Snapshot(),
+		// #36：推送通道的自检面。未配置时 Configured=false，其余字段为空。
+		"push": gaterefusal.PushStatusSnapshot(),
 	})
 }

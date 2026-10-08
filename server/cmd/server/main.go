@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/dbreader"
 	"github.com/multica-ai/multica/server/internal/dbstartup"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/gaterefusal"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -406,6 +407,11 @@ func main() {
 	}
 	stopStartup()
 	slog.Info("connected to database")
+
+	// 闸门拒绝的推送通道（#36）。评论触发的委派走 API 进程，所以这一侧要起自己的
+	// 投递器；未配置时 StartPushFromEnv 返回空操作，不起 goroutine、不产生流量。
+	stopGatePush := gaterefusal.StartPushFromEnv(context.Background(), "api", slog.Default())
+	defer stopGatePush()
 	logPoolConfig("primary", pool)
 
 	// The replica is an optional capacity optimization, never a startup
