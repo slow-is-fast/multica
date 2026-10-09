@@ -334,3 +334,40 @@ WHERE a.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
 GROUP BY atq.agent_id, 2
 ORDER BY atq.agent_id, 2;
+
+-- name: RuelListAgentTaskUsageInWindow :many
+-- Ruel #41: every usage row for one agent's runs inside the window [since, until).
+--
+-- task_usage carries no agent dimension, so the scope comes from the run: the
+-- row's task joined to its agent. Cost is priced per model on the server side,
+-- so this returns raw rows, never pre-aggregated sums.
+--
+-- @since and @until are already UTC instants computed by the caller. Both
+-- bounds are enforced here, and the upper one is exclusive, so a row lands in
+-- exactly one window: a closed upper bound would count the boundary instant
+-- twice (in this window and the next), and no upper bound would let a later
+-- window's rows leak backwards into an earlier one.
+SELECT u.*
+FROM task_usage u
+JOIN agent_task_queue t ON t.id = u.task_id
+WHERE t.agent_id = @agent_id
+  AND u.created_at >= @since
+  AND u.created_at < @until
+ORDER BY u.created_at, u.id;
+
+-- name: RuelListWorkspaceTaskUsageInWindow :many
+-- Ruel #41: the same window scoped to a workspace.
+--
+-- agent_task_queue has no workspace column, so the scope walks task -> issue ->
+-- workspace. **A run without an issue is invisible here**: its usage never
+-- enters a workspace total. That is a real gap, not an oversight — the caller
+-- cannot count what the query cannot see, so it is stated in the budget's
+-- documentation rather than silently absorbed.
+SELECT u.*
+FROM task_usage u
+JOIN agent_task_queue t ON t.id = u.task_id
+JOIN issue i ON i.id = t.issue_id
+WHERE i.workspace_id = @workspace_id
+  AND u.created_at >= @since
+  AND u.created_at < @until
+ORDER BY u.created_at, u.id;

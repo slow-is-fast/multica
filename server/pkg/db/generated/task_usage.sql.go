@@ -813,3 +813,100 @@ func (q *Queries) UpsertTaskUsage(ctx context.Context, arg UpsertTaskUsageParams
 	)
 	return err
 }
+
+const ruelListAgentTaskUsageInWindow = `-- name: RuelListAgentTaskUsageInWindow :many
+SELECT u.id, u.task_id, u.provider, u.model, u.input_tokens, u.output_tokens, u.cache_read_tokens, u.cache_write_tokens, u.created_at, u.updated_at, u.cost_usd_ticks
+FROM task_usage u
+JOIN agent_task_queue t ON t.id = u.task_id
+WHERE t.agent_id = $1
+  AND u.created_at >= $2
+  AND u.created_at < $3
+ORDER BY u.created_at, u.id
+`
+
+type RuelListAgentTaskUsageInWindowParams struct {
+	AgentID pgtype.UUID        `json:"agent_id"`
+	Since   pgtype.Timestamptz `json:"since"`
+	Until   pgtype.Timestamptz `json:"until"`
+}
+
+func (q *Queries) RuelListAgentTaskUsageInWindow(ctx context.Context, arg RuelListAgentTaskUsageInWindowParams) ([]TaskUsage, error) {
+	rows, err := q.db.Query(ctx, ruelListAgentTaskUsageInWindow, arg.AgentID, arg.Since, arg.Until)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TaskUsage{}
+	for rows.Next() {
+		var i TaskUsage
+		if err := rows.Scan(
+			&i.ID,
+			&i.TaskID,
+			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CostUsdTicks,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const ruelListWorkspaceTaskUsageInWindow = `-- name: RuelListWorkspaceTaskUsageInWindow :many
+SELECT u.id, u.task_id, u.provider, u.model, u.input_tokens, u.output_tokens, u.cache_read_tokens, u.cache_write_tokens, u.created_at, u.updated_at, u.cost_usd_ticks
+FROM task_usage u
+JOIN agent_task_queue t ON t.id = u.task_id
+JOIN issue i ON i.id = t.issue_id
+WHERE i.workspace_id = $1
+  AND u.created_at >= $2
+  AND u.created_at < $3
+ORDER BY u.created_at, u.id
+`
+
+type RuelListWorkspaceTaskUsageInWindowParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	Until       pgtype.Timestamptz `json:"until"`
+}
+
+func (q *Queries) RuelListWorkspaceTaskUsageInWindow(ctx context.Context, arg RuelListWorkspaceTaskUsageInWindowParams) ([]TaskUsage, error) {
+	rows, err := q.db.Query(ctx, ruelListWorkspaceTaskUsageInWindow, arg.WorkspaceID, arg.Since, arg.Until)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TaskUsage{}
+	for rows.Next() {
+		var i TaskUsage
+		if err := rows.Scan(
+			&i.ID,
+			&i.TaskID,
+			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CostUsdTicks,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
