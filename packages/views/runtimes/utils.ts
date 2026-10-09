@@ -266,6 +266,7 @@ const MODEL_PRICING: Record<
   "gpt-5.4-mini":       { input: 0.75, output: 4.50, cacheRead: 0.075, cacheWrite: 0.75 },
   "gpt-5.4":            { input: 2.50, output: 15,   cacheRead: 0.25,  cacheWrite: 2.50 },
   "gpt-5.3-codex":      { input: 1.75, output: 14,   cacheRead: 0.175, cacheWrite: 1.75 },
+  "gpt-5.2-codex":      { input: 1.75, output: 14,   cacheRead: 0.175, cacheWrite: 1.75 },
 
   // -- OpenAI: GPT-5 family (Codex CLI's default is gpt-5-codex; -codex/-mini/-nano variants priced per OpenAI tiers) --
   "gpt-5-codex":        { input: 1.25, output: 10,   cacheRead: 0.125, cacheWrite: 1.25 },
@@ -386,6 +387,23 @@ const MODEL_PRICING: Record<
   "grok-4.20-multi-agent-0309":   { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
   "grok-4.20-0309-reasoning":     { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
   "grok-4.20-0309-non-reasoning": { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
+
+
+  // -- Google Gemini and MiniMax (ruel#44). These rows were already in the
+  //    server table (server/internal/metrics/pricing.go) but missing here,
+  //    which is the gap in the direction that is easy to miss: the budget
+  //    gate bills the model while the dashboard shows it as $0. Rates are
+  //    mirrored from the server side, which is the copy that drives the
+  //    gate; TestFrontendPricingMatchesServerOnSharedRows pins the overlap.
+  //    MiniMax bills cache writes separately (1.25x input), hence the
+  //    distinct cacheWrite; the highspeed tier doubles input/output and
+  //    keeps the cache rates. --
+  "gemini-3.1-pro":        { input: 2,    output: 12,   cacheRead: 0.20, cacheWrite: 2 },
+  "gemini-3-flash":        { input: 0.5,  output: 3,    cacheRead: 0.05, cacheWrite: 0.5 },
+  "gemini-2.5-pro":        { input: 1.25, output: 10,   cacheRead: 0.31, cacheWrite: 1.25 },
+  "gemini-2.5-flash":      { input: 0.3,  output: 2.5,  cacheRead: 0.03, cacheWrite: 0.3 },
+  "minimax-m2.7":          { input: 0.3,  output: 1.2,  cacheRead: 0.06, cacheWrite: 0.375 },
+  "minimax-m2.7-highspeed":{ input: 0.6,  output: 2.4,  cacheRead: 0.06, cacheWrite: 0.375 },
 
   // -- Cursor Composer / Auto (cursor.com/docs/models-and-pricing,
   //    cursor.com/docs/models/cursor-composer-2,

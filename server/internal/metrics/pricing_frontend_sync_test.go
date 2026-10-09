@@ -283,15 +283,12 @@ func TestFrontendPricingCoverageGapIsOnlyTheKnownSet(t *testing.T) {
 // this red instead of silently widening the gap.
 var knownFrontendOnly = []string{}
 
-// Still 7 as of the server-side batch of ruel#44: the four Gemini rows, the
-// two MiniMax rows and gpt-5.2-codex. Closed in the next commit, which ports
-// them to packages/views/runtimes/utils.ts.
-var knownServerOnly = []string{
-	"google:gemini-2.5-flash", "google:gemini-2.5-pro",
-	"google:gemini-3-flash", "google:gemini-3.1-pro",
-	"minimax:m2.7", "minimax:m2.7-highspeed",
-	"openai:gpt-5.2-codex",
-}
+// Empty as of ruel#44 (was 7): the four Gemini rows, the two MiniMax rows and
+// gpt-5.2-codex were ported to packages/views/runtimes/utils.ts. Both
+// directions of the coverage gap are now closed, so both lists are empty and
+// this guard is purely a regression net — any row added to one side without
+// the other turns it red.
+var knownServerOnly = []string{}
 
 // TestEstimateUsageCostAgreesWithFrontendFormula closes the loop the table
 // comparison cannot: the same usage row must cost the same dollars on both
