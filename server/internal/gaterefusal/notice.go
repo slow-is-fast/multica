@@ -41,6 +41,13 @@ const (
 	// DimensionBudget 是「钱」维度：封的是总量，per_issue 累计不会归零，撞上一次就是
 	// 永久的，要人先解释那笔钱花在哪。
 	DimensionBudget = "delegation_budget_exceeded"
+	// DimensionRunCost 是「单轮 Run 的钱」维度（#40）。
+	//
+	// 与 DimensionBudget 的区别不是粒度而是**归零方式**：per_issue 累计不归零（撞上
+	// 一次就永久封住那条 Issue），per_run 每轮从头算。所以两者的出路也不同——预算那
+	// 个要「人自己派一次单」才放行，这个只要把额度调高重跑即可。维度必须分开，否则
+	// 接收方会照着错的那个去处理。
+	DimensionRunCost = "run_cost_budget_exceeded"
 )
 
 const (
@@ -66,6 +73,12 @@ type Notice struct {
 	IssueID      string    `json:"issue_id"`
 	AgentID      string    `json:"agent_id"`
 	ParentTaskID string    `json:"parent_task_id"`
+	// TaskID 是被拒的那**一轮** Run。委派闸门不填它（那两道闸门拦在入队之前，Run 还
+	// 不存在）；per_run 成本闸门填，因为它判的就是某一轮。
+	//
+	// 它同时参与下面的合并键：per_run 是按 Run 判的，同一条 Issue 上两轮各自超限是
+	// **两件事**，不该被揉成一条 count=2。
+	TaskID string `json:"task_id,omitempty"`
 
 	// 深度维度
 	Depth      *int `json:"depth,omitempty"`
@@ -108,7 +121,12 @@ func Record(n Notice) {
 	// 旧回执，它必然超出窗口，于是 `break` 掉而漏掉后面那条还在窗口内的。
 	for i := len(notices) - 1; i >= 0; i-- {
 		existing := notices[i]
-		if existing.Dimension != n.Dimension || existing.IssueID != n.IssueID {
+		// TaskID 参与合并键后对既有两个维度无影响：它们都不填 TaskID，两边都是空串，
+		// 比较恒为相等，合并行为与之前完全一致。只有 per_run 这类按 Run 判的维度会因
+		// 此分成多条——这正是要的。
+		if existing.Dimension != n.Dimension ||
+			existing.IssueID != n.IssueID ||
+			existing.TaskID != n.TaskID {
 			continue
 		}
 		if now.Sub(existing.LastAt) > DedupeWindow {
@@ -123,6 +141,12 @@ func Record(n Notice) {
 		}
 		if n.SpentUSD != nil {
 			existing.SpentUSD = n.SpentUSD
+		}
+		// BudgetUSD 也得跟着刷新：只刷「已花」不刷「上限」，两条数字就来自不同时刻，
+		// 回执里「$已花 / $上限」这一对会被读错。既有那两个维度不填 BudgetUSD，
+		// nil 判断让它们不受影响。
+		if n.BudgetUSD != nil {
+			existing.BudgetUSD = n.BudgetUSD
 		}
 		if n.PricedRows != nil {
 			existing.PricedRows = n.PricedRows
