@@ -4951,6 +4951,23 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Ruel 新增：per_run 成本上限（#40）。
+	//
+	// 挂在**写库之后**：这一轮的最新用量必须已经落库，累计才算得准。
+	//
+	// 挂在这里而不是另起一个轮询，是因为用量上报本来就是唯一一个「这一轮又花了多少」
+	// 的确定信号——另起轮询要么有延迟，要么在没人干活的时候白跑。
+	//
+	// 失败只记一笔、不改响应码：用量已经写进去了，回一个 5xx 会让 daemon 以为上报
+	// 失败而重试，把一次已经成功的写入又投一遍。回执在服务端内部已经记下（#33），
+	// 所以这次失败不会变成静默失败。
+	if _, err := h.TaskService.RuelEnforceRunCostBudget(r.Context(), task); err != nil {
+		slog.Error("ruel: per_run 成本上限触发了，但停掉这一轮时失败",
+			"task_id", taskID,
+			"error", err,
+		)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
