@@ -19,7 +19,19 @@ import (
 //
 // Refs ruel#39.
 
-const pricingFrontendRel = "packages/views/runtimes/utils.ts"
+// The frontend table is GENERATED from modelPrices (ruel#44), so these guards
+// no longer police two hand-maintained copies. What they still buy is worth
+// naming, because it is easy to assume a generated file needs no checking:
+//
+//   - The generator is code, and code has bugs. These tests read the file the
+//     UI actually imports and compare it against the table it came from, so a
+//     generator that swapped two fields, dropped a row, or emitted a key the
+//     resolver cannot reach turns red here.
+//   - The alias rules are NOT generated. A row can be present in both tables
+//     and still be unreachable from the id a daemon reports; that is exactly
+//     the "dead row" failure the coverage guard was written to catch, and
+//     generating the table does not make it impossible.
+const pricingFrontendRel = generatedFrontendPricingRel
 
 // pricingFrontendPath resolves the frontend table from server/internal/metrics.
 // A guard that cannot find what it guards must fail, not skip: skipping is how

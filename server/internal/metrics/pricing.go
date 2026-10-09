@@ -92,18 +92,38 @@ var modelPrices = map[string]ModelPrice{
 	// three times Opus 4.5's — so an unanchored `claude-opus-4` rule would
 	// over-bill every later Opus 4.x by 3x. That is the same tier-borrowing
 	// trap as Fable 5 / 5.1, and it is why both rules end at versionEnd.
-	"anthropic:claude-opus-4.1":   {Provider: "anthropic", Model: "claude-opus-4.1", InputPerM: 15.00, CacheReadPerM: 1.50, CacheWritePerM: 18.75, OutputPerM: 75.00},
-	"anthropic:claude-opus-4":     {Provider: "anthropic", Model: "claude-opus-4", InputPerM: 15.00, CacheReadPerM: 1.50, CacheWritePerM: 18.75, OutputPerM: 75.00},
-	"anthropic:claude-sonnet-4":   {Provider: "anthropic", Model: "claude-sonnet-4", InputPerM: 3.00, CacheReadPerM: 0.30, CacheWritePerM: 3.75, OutputPerM: 15.00},
-	"anthropic:claude-haiku-3.5":  {Provider: "anthropic", Model: "claude-haiku-3.5", InputPerM: 0.80, CacheReadPerM: 0.08, CacheWritePerM: 1.00, OutputPerM: 4.00},
-	"deepseek:v4-pro":             {Provider: "deepseek", Model: "v4-pro", InputPerM: 1.74, CacheReadPerM: 0.0145, CacheWritePerM: 1.74, OutputPerM: 3.48},
-	"deepseek:v4-flash":           {Provider: "deepseek", Model: "v4-flash", InputPerM: 0.56, CacheReadPerM: 0.0112, CacheWritePerM: 0.56, OutputPerM: 1.12},
-	"minimax:m2.7":                {Provider: "minimax", Model: "m2.7", InputPerM: 0.30, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 1.20},
-	"minimax:m2.7-highspeed":      {Provider: "minimax", Model: "m2.7-highspeed", InputPerM: 0.60, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 2.40},
-	"google:gemini-3-flash":       {Provider: "google", Model: "gemini-3-flash", InputPerM: 0.50, CacheReadPerM: 0.05, CacheWritePerM: 0.50, OutputPerM: 3.00},
-	"google:gemini-3.1-pro":       {Provider: "google", Model: "gemini-3.1-pro", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.00, OutputPerM: 12.00},
-	"google:gemini-2.5-pro":       {Provider: "google", Model: "gemini-2.5-pro", InputPerM: 1.25, CacheReadPerM: 0.31, CacheWritePerM: 1.25, OutputPerM: 10.00},
-	"google:gemini-2.5-flash":     {Provider: "google", Model: "gemini-2.5-flash", InputPerM: 0.30, CacheReadPerM: 0.03, CacheWritePerM: 0.30, OutputPerM: 2.50},
+	"anthropic:claude-opus-4.1":  {Provider: "anthropic", Model: "claude-opus-4.1", InputPerM: 15.00, CacheReadPerM: 1.50, CacheWritePerM: 18.75, OutputPerM: 75.00},
+	"anthropic:claude-opus-4":    {Provider: "anthropic", Model: "claude-opus-4", InputPerM: 15.00, CacheReadPerM: 1.50, CacheWritePerM: 18.75, OutputPerM: 75.00},
+	"anthropic:claude-sonnet-4":  {Provider: "anthropic", Model: "claude-sonnet-4", InputPerM: 3.00, CacheReadPerM: 0.30, CacheWritePerM: 3.75, OutputPerM: 15.00},
+	"anthropic:claude-haiku-3.5": {Provider: "anthropic", Model: "claude-haiku-3.5", InputPerM: 0.80, CacheReadPerM: 0.08, CacheWritePerM: 1.00, OutputPerM: 4.00},
+	// DeepSeek (api-docs.deepseek.com/quick_start/pricing). The official
+	// catalog lists exactly two current SKUs; `deepseek-chat` and
+	// `deepseek-reasoner` are aliases that route to v4-flash (non-thinking
+	// and thinking mode respectively) per the same page.
+	//
+	// Both SKUs are under a 75%-off promo that ends 2026-05-31 15:59 UTC, and
+	// these rows carry the POST-promo standard rate ($1.74 / $3.48 pro,
+	// $0.56 / $1.12 flash) on purpose: pricing at the promo rate makes the
+	// dashboard and every budget jump 4x on June 1. A brief over-estimate
+	// during the promo is the cheaper error.
+	//
+	// The flash row used to carry $0.14 / $0.28 — exactly the promo price, a
+	// quarter of standard — while the sibling pro row carried the post-promo
+	// rate this comment asked for. Same table, two policies, no way to
+	// notice. That is worth stating because the promo number is not wrong in
+	// isolation: someone re-deriving this row from the price sheet today
+	// would put $0.14 back, and nothing in the table would object.
+	//
+	// (Ported from packages/views/runtimes/utils.ts when that table became
+	// generated from this one — see pricing_generated.go.)
+	"deepseek:v4-pro":         {Provider: "deepseek", Model: "v4-pro", InputPerM: 1.74, CacheReadPerM: 0.0145, CacheWritePerM: 1.74, OutputPerM: 3.48},
+	"deepseek:v4-flash":       {Provider: "deepseek", Model: "v4-flash", InputPerM: 0.56, CacheReadPerM: 0.0112, CacheWritePerM: 0.56, OutputPerM: 1.12},
+	"minimax:m2.7":            {Provider: "minimax", Model: "m2.7", InputPerM: 0.30, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 1.20},
+	"minimax:m2.7-highspeed":  {Provider: "minimax", Model: "m2.7-highspeed", InputPerM: 0.60, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 2.40},
+	"google:gemini-3-flash":   {Provider: "google", Model: "gemini-3-flash", InputPerM: 0.50, CacheReadPerM: 0.05, CacheWritePerM: 0.50, OutputPerM: 3.00},
+	"google:gemini-3.1-pro":   {Provider: "google", Model: "gemini-3.1-pro", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.00, OutputPerM: 12.00},
+	"google:gemini-2.5-pro":   {Provider: "google", Model: "gemini-2.5-pro", InputPerM: 1.25, CacheReadPerM: 0.31, CacheWritePerM: 1.25, OutputPerM: 10.00},
+	"google:gemini-2.5-flash": {Provider: "google", Model: "gemini-2.5-flash", InputPerM: 0.30, CacheReadPerM: 0.03, CacheWritePerM: 0.30, OutputPerM: 2.50},
 	// xAI Grok (docs.x.ai/developers/pricing). Short-context tier: xAI bills
 	// a request at 2x once its prompt reaches 200K tokens, but a usage record
 	// aggregates every model call in a turn, so it cannot say which tier any
@@ -141,8 +161,10 @@ var modelPrices = map[string]ModelPrice{
 	// providers/moonshotai/models/kimi-k3.toml). Moonshot bills no separate
 	// cache write, so CacheWritePerM mirrors Input.
 	"moonshotai:kimi-k3": {Provider: "moonshotai", Model: "kimi-k3", InputPerM: 3.0, CacheReadPerM: 0.30, CacheWritePerM: 3.0, OutputPerM: 15.0},
-	// Kimi K2.6 (kimi.com/resources/kimi-k2-6-pricing, the page the frontend
-	// cites). CacheWrite mirrors input for the same reason K3's does:
+	// Kimi K2.6 (kimi.com/resources/kimi-k2-6-pricing). Only K2.6 is on the
+	// official price sheet today — earlier K2 variants are deliberately absent
+	// until Moonshot publishes their rates, rather than inheriting a
+	// neighbour's. CacheWrite mirrors input for the same reason K3's does:
 	// Moonshot bills no separate cache-write rate.
 	"moonshotai:kimi-k2.6": {Provider: "moonshotai", Model: "kimi-k2.6", InputPerM: 0.95, CacheReadPerM: 0.16, CacheWritePerM: 0.95, OutputPerM: 4.00},
 	// Zhipu GLM-5 (docs.bigmodel.cn/cn/guide/start/pricing, accessed
