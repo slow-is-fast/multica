@@ -800,6 +800,10 @@
     "hover_no_run": "No run",
     "hover_idle": "Idle {{duration}}",
     "note_unmapped": "No price on file for {{models}}; their tokens are counted but their cost is not.",
+    "unpriced": "unpriced",
+    "unpriced_hint": "Usage recorded, but no rate on file for this model, so its cost is not counted.",
+    "unpriced_rows_one": "{{count}} row unpriced",
+    "unpriced_rows_other": "{{count}} rows unpriced",
     "note_estimate": "Cost is estimated from published model rates, except where the provider reported its own figure."
   },
   "terminate_dialog": {

@@ -411,7 +411,19 @@ function SparklineRunSummary({ run }: { run: TimelineRun }) {
   const { t } = useT("issues");
   const trigger = useTriggerText(run.task);
   const status = useStatusLabel(run.task.status);
-  const cost = run.usage?.cost;
+  // Three states, and the middle one is the whole point: a run that recorded
+  // usage we could not price is NOT a run with no usage. Reporting it as
+  // "没有用量记录" would be a lie, and reporting it as $0.00 would read as
+  // free. It gets its own label.
+  const cost =
+    // A run still going has not reported usage yet — that is not "none".
+    run.priced
+      ? formatUsd(run.usage?.cost ?? 0)
+      : run.active
+        ? null
+        : run.usage
+          ? t(($) => $.runs_timeline.unpriced)
+          : t(($) => $.execution_log.strip_no_usage);
   return (
     <>
       <RunTriggerLabel task={run.task} fallback={trigger}>
@@ -419,8 +431,7 @@ function SparklineRunSummary({ run }: { run: TimelineRun }) {
       </RunTriggerLabel>
       <span className="text-micro text-muted-foreground">
         {[
-          // A run still going has not reported usage yet — that is not "none".
-          cost != null ? formatUsd(cost) : run.active ? null : t(($) => $.execution_log.strip_no_usage),
+          cost,
           run.durationMs != null ? formatAgentTime(run.durationMs / 1000, "0s") : null,
           run.task.status === "completed" ? null : status,
         ]
@@ -490,6 +501,12 @@ export function IssueRunsTotal({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
     [tasks, pricings],
   );
+  // Both answers come off the summary, which computes them once over all the
+  // rows. `priced` is not "has usage": an issue whose every row is unpriced
+  // has usage and still has no figure — showing "$0.00" for it is what makes
+  // an unpriced issue read as a free one.
+  const figure = total?.priced ? total.cost : null;
+  const unpricedRows = total?.unpricedRows ?? 0;
   const runCount = tasks.filter((task) => task.status !== "deferred").length;
   if (runCount === 0) return null;
 
@@ -501,11 +518,19 @@ export function IssueRunsTotal({
   // a host that renders this outside the section's `@container` degrade to the
   // full form instead of silently losing the count forever. With no cost to
   // keep, the count is the whole affordance and never tiers away.
-  const narrowTier = !total
+  const narrowTier = figure == null
     ? ""
     : alone
       ? "@max-[14rem]/execution-log:hidden"
       : "@max-[16rem]/execution-log:hidden";
+  // The unpriced count tiers away FIRST — before the run count and before the
+  // amount. It is a caveat about the amount, so where the header has to give
+  // something up it gives up the caveat rather than a figure: a reader who
+  // sees "$166" without knowing it is incomplete is misled less than one who
+  // sees no figure at all.
+  const caveatTier = alone
+    ? "@max-[20rem]/execution-log:hidden"
+    : "@max-[22rem]/execution-log:hidden";
 
   return (
     <Tooltip>
@@ -518,10 +543,18 @@ export function IssueRunsTotal({
         <span className={`text-muted-foreground ${narrowTier}`}>
           {t(($) => $.execution_log.summary_runs, { count: runCount })}
         </span>
-        {total && (
+        {figure != null && (
           <>
             <span className={`text-faint-foreground ${narrowTier}`}>·</span>
-            <span className="font-medium">{formatUsd(total.cost)}</span>
+            <span className="font-medium">{formatUsd(figure)}</span>
+          </>
+        )}
+        {unpricedRows > 0 && (
+          <>
+            <span className={`text-faint-foreground ${caveatTier}`}>·</span>
+            <span className={`text-warning ${caveatTier}`}>
+              {t(($) => $.runs_timeline.unpriced_rows, { count: unpricedRows })}
+            </span>
           </>
         )}
       </TooltipTrigger>
@@ -742,8 +775,14 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
         <span className="sr-only">
           {[statusTitle, time].filter(Boolean).join(" · ")}
         </span>
-        {usage ? (
+        {/* Three states, not two: "no usage" and "usage we could not price"
+            are different, and collapsing them into an em dash loses the one
+            thing the reader needs to know — that the cost is missing, not
+            zero. */}
+        {usage?.priced ? (
           <span className="tabular-nums">{formatUsd(usage.cost)}</span>
+        ) : usage ? (
+          <span className="text-micro text-warning">{t(($) => $.runs_timeline.unpriced)}</span>
         ) : (
           <span className="text-faint-foreground">—</span>
         )}

@@ -193,10 +193,18 @@ function RunStats({ timeline }: { timeline: RunTimeline }) {
     <div className="flex flex-wrap items-end gap-x-8 gap-y-3 px-6">
       <Stat label={t(($) => $.runs_timeline.stat_spent)}>
         {/* Proportional figures: a standalone hero number set in tabular
-            digits reads loose. "—" when nothing reported usage — never $0. */}
+            digits reads loose. "—" when nothing could be priced — never $0. */}
         <span className="text-display-sm font-semibold">
           {timeline.pricedCount > 0 ? formatUsd(timeline.totalCost) : "—"}
         </span>
+        {/* Adjacent to the figure it qualifies, because a total that omits
+            rows is only honest while it says so. The models themselves are
+            named in the footnote below; this is the magnitude. */}
+        {timeline.unpricedRowCount > 0 && (
+          <span className="ml-1.5 align-baseline text-caption font-medium text-warning">
+            {t(($) => $.runs_timeline.unpriced_rows, { count: timeline.unpricedRowCount })}
+          </span>
+        )}
       </Stat>
       <Stat label={t(($) => $.runs_timeline.stat_agent_time)}>
         <span className="text-title-sm font-medium">
@@ -298,7 +306,11 @@ function RunTimelineChart({ timeline }: { timeline: RunTimeline }) {
   // 2px via non-scaling-stroke however wide the dialog is.
   const steps = timeline.cumulative;
   const { line, area } = stepCurvePath(steps, timeline.domain, yMax);
-  const last = steps[steps.length - 1];
+  // Labelled only when there is a figure to label. Without this the y scale
+  // still printed "$0.00" for an issue nothing could be priced — the very
+  // "reads as free" the em dash in the stats row exists to avoid, leaking
+  // back in through the axis.
+  const last = timeline.pricedCount > 0 ? steps[steps.length - 1] : undefined;
 
   // Label the one run that moved the curve most. Left of its step the curve is
   // lower (it only ever rises), so a label ending at the step's top-left
@@ -637,8 +649,12 @@ function RunHoverCard({ run }: { run: TimelineRun }) {
         <span className="truncate">{[getActorName("agent", run.task.agent_id), ...facts].join(" · ")}</span>
       </span>
       <span className="text-micro tabular-nums">
-        <span className="font-medium">
-          {run.usage ? formatUsd(run.usage.cost) : t(($) => $.runs_timeline.no_usage)}
+        <span className={run.usage && !run.usage.priced ? "text-warning" : "font-medium"}>
+          {run.usage?.priced
+            ? formatUsd(run.usage.cost)
+            : run.usage
+              ? t(($) => $.runs_timeline.unpriced)
+              : t(($) => $.runs_timeline.no_usage)}
         </span>
         <span className="text-muted-foreground">
           {" · "}
@@ -847,8 +863,14 @@ function RunListRow({
         )}
       </span>
       <span className="flex w-36 shrink-0 items-center justify-end gap-2">
-        {run.usage && run.breakdown ? (
+        {run.usage && run.breakdown && run.usage.priced ? (
           <CostCell run={run} maxCost={maxCost} />
+        ) : run.usage ? (
+          // Usage recorded, price unknown. Not "—" (that is no usage at all)
+          // and not "$0.00" (that reads as free): the row says why it is empty.
+          <span className="text-micro text-warning" title={t(($) => $.runs_timeline.unpriced_hint)}>
+            {t(($) => $.runs_timeline.unpriced)}
+          </span>
         ) : (
           // No figure is not zero: a run without usage data was not free.
           <span className="text-faint-foreground" title={t(($) => $.runs_timeline.no_usage)}>

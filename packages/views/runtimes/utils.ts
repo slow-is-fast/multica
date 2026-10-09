@@ -637,6 +637,21 @@ export interface TaskUsageSummary {
   cacheWrite: number;
   /** Distinct models this run touched, in first-seen order. Usually one. */
   models: string[];
+  /**
+   * Whether this summary carries a cost figure — not "has usage".
+   *
+   * False when every row is unpriced. Such a run recorded usage and still has
+   * no figure: its $0 is unknown, not spent, and rendering it as "$0.00" is
+   * what makes an unpriced issue read as a free one.
+   *
+   * True when any row was priced OR the cost is non-zero. That second clause
+   * matters: a row the provider billed only PARTLY is unpriced (its remaining
+   * tokens have no rate) yet its billed half is real money, and hiding it
+   * would understate the issue more than showing an incomplete figure does.
+   */
+  priced: boolean;
+  /** Rows that could not be priced. Counted; charging nothing. */
+  unpricedRows: number;
 }
 
 /**
@@ -661,6 +676,7 @@ export function summarizeTaskUsage(
     tokens: 0, cost: 0, cacheSavings: 0,
     input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
     models,
+    priced: false, unpricedRows: 0,
   };
 
   for (const slice of usage) {
@@ -670,10 +686,16 @@ export function summarizeTaskUsage(
     summary.cacheWrite += slice.cache_write_tokens;
     summary.cost += estimateCost(slice);
     summary.cacheSavings += estimateCacheSavings(slice);
+    if (isUsageRowUnpriced(slice)) summary.unpricedRows += 1;
     if (slice.model && !models.includes(slice.model)) models.push(slice.model);
   }
   summary.tokens =
     summary.input + summary.output + summary.cacheRead + summary.cacheWrite;
+  // Answered here, once, because every surface that shows a cost has to ask
+  // it and three copies of "can we price this" would drift — a header saying
+  // "$0.00" next to a banner naming the model it could not price is exactly
+  // the confusion this field exists to end.
+  summary.priced = summary.unpricedRows < usage.length || summary.cost > 0;
 
   return summary;
 }

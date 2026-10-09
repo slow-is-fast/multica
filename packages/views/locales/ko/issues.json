@@ -765,6 +765,9 @@
     "hover_no_run": "실행 없음",
     "hover_idle": "유휴 {{duration}}",
     "note_unmapped": "{{models}}의 가격 정보가 없어 토큰은 집계되지만 비용은 포함되지 않습니다.",
+    "unpriced": "계산 불가",
+    "unpriced_hint": "사용량은 기록되었지만 이 모델의 가격이 없어 비용에 포함되지 않았습니다.",
+    "unpriced_rows_other": "{{count}}건 계산 불가",
     "note_estimate": "비용은 공개된 모델 요금 기준 추정치이며, 제공자가 자체 비용을 보고한 경우는 그 값을 사용합니다."
   },
   "terminate_dialog": {

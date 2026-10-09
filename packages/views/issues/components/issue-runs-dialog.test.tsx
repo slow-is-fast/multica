@@ -168,6 +168,39 @@ describe("IssueRunsDialog", () => {
     expect(screen.getByText(/No price on file for acme\/made-up-model/)).toBeInTheDocument();
   });
 
+  it("counts the rows it could not price beside the total, not inside it", () => {
+    open([
+      makeTask({ id: "priced", usage: [usage({ output_tokens: 200_000 })] }),
+      makeTask({
+        id: "unknown",
+        started_at: "2026-09-27T11:00:00",
+        completed_at: "2026-09-27T11:05:00",
+        usage: [usage({ provider: "acme", model: "made-up-model" })],
+      }),
+    ]);
+
+    const stat = (label: string) => screen.getByText(label).parentElement!;
+    // $5.00 is the priced run alone. Folding the unknown run in as $0 would
+    // leave this figure looking complete when it is not.
+    expect(stat("Spent")).toHaveTextContent("$5.00");
+    expect(stat("Spent")).toHaveTextContent("1 row unpriced");
+    // And the run's own row says why it is empty — "no usage" would be a lie,
+    // "$0.00" would read as free.
+    expect(screen.getByTitle(/Usage recorded, but no rate on file/)).toHaveTextContent("unpriced");
+    expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
+  });
+
+  it("withholds the total when nothing on the issue could be priced", () => {
+    open([makeTask({ usage: [usage({ provider: "acme", model: "made-up-model" })] })]);
+
+    const stat = (label: string) => screen.getByText(label).parentElement!;
+    // "—", not "$0.00": an issue we could not price is not an issue that was
+    // free, and the count says how much is missing from the figure.
+    expect(stat("Spent")).toHaveTextContent("—");
+    expect(stat("Spent")).toHaveTextContent("1 row unpriced");
+    expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
+  });
+
   it("re-prices when a custom model rate is saved", () => {
     // `estimateCost` reads the custom-rate store imperatively, so nothing
     // re-renders the dialog on a rate change unless it subscribes.

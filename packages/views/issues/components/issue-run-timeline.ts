@@ -43,6 +43,17 @@ export interface TimelineRun {
   breakdown: CostBreakdown | null;
   /** The issue's running total once this run ended — what the curve reads there. */
   costSoFar: number;
+  /**
+   * Usage rows in this run we could not price. Their tokens are counted;
+   * their money is not, which is why the run's total understates reality
+   * and the UI has to say so.
+   */
+  unpricedRows: number;
+  /**
+   * Whether this run has a cost figure worth showing. False renders "—",
+   * never "$0.00" — a run we could not price is not a run that was free.
+   */
+  priced: boolean;
 }
 
 export interface CumulativeStep {
@@ -59,7 +70,20 @@ export interface RunTimeline {
   /** Oldest first. */
   runs: TimelineRun[];
   totalCost: number;
+  /**
+   * Runs with a cost figure to show — not "runs that recorded usage".
+   *
+   * A run whose every row is unpriced recorded usage and still has no
+   * figure: its $0 is unknown, not spent. Counting it here is what used to
+   * let an issue we could not price at all display "$0.00" and read as
+   * free, which is the failure this distinction exists to prevent.
+   */
   pricedCount: number;
+  /**
+   * Usage rows across the whole issue that could not be priced. Counted and
+   * shown ("有 N 条算不出"), never folded into `totalCost` as zeros.
+   */
+  unpricedRowCount: number;
   /** Sum of finished runs' wall time. */
   agentMs: number;
   /** First start to last end (or now, while a run is active). */
@@ -119,6 +143,8 @@ export function toTimelineRun(task: AgentTask, nowMs: number): TimelineRun | nul
     usage,
     breakdown: usage ? sumBreakdown(task) : null,
     costSoFar: 0,
+    unpricedRows: usage?.unpricedRows ?? 0,
+    priced: usage?.priced ?? false,
   };
 }
 
@@ -130,6 +156,7 @@ export function buildRunTimeline(tasks: readonly AgentTask[], nowMs: number): Ru
 
   let totalCost = 0;
   let pricedCount = 0;
+  let unpricedRowCount = 0;
   let agentMs = 0;
   let failedCount = 0;
   let cancelledCount = 0;
@@ -138,9 +165,19 @@ export function buildRunTimeline(tasks: readonly AgentTask[], nowMs: number): Ru
   const laneMap = new Map<string, TimelineRun[]>();
 
   for (const run of runs) {
+    unpricedRowCount += run.unpricedRows;
+    if (run.priced) pricedCount += 1;
+    // Deliberately NOT gated on `run.priced`. An unpriced row contributes 0
+    // for the part nobody priced — and its billed half, which is real money,
+    // on top. Filtering the sum by "we priced this" would drop that half, so
+    // the total is the sum of everything we could account for, while
+    // `pricedCount` and `unpricedRowCount` describe how complete it is.
+    //
+    // Subtracting the unpriced rows from this sum would also be a no-op: 0 is
+    // the identity of addition. The harm was never a 0 entering the total —
+    // it was a 0 opening the gate and letting "$0.00" read as "free".
     if (run.usage) {
       totalCost += run.usage.cost;
-      pricedCount += 1;
       maxRunCost = Math.max(maxRunCost, run.usage.cost);
     }
     if (run.durationMs != null) agentMs += run.durationMs;
@@ -178,6 +215,7 @@ export function buildRunTimeline(tasks: readonly AgentTask[], nowMs: number): Ru
     runs,
     totalCost,
     pricedCount,
+    unpricedRowCount,
     agentMs,
     elapsedMs,
     failedCount,

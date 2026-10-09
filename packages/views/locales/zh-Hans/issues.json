@@ -765,6 +765,9 @@
     "hover_no_run": "没有运行",
     "hover_idle": "空闲 {{duration}}",
     "note_unmapped": "{{models}} 没有维护价格，token 已计入，费用未计入。",
+    "unpriced": "算不出",
+    "unpriced_hint": "有用量记录，但价目表没有这个模型的价格，费用未计入。",
+    "unpriced_rows_other": "有 {{count}} 条算不出",
     "note_estimate": "费用按各模型公开价目估算；供应商回报实际费用时以回报值为准。"
   },
   "terminate_dialog": {

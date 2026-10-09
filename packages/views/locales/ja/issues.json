@@ -765,6 +765,9 @@
     "hover_no_run": "実行なし",
     "hover_idle": "アイドル {{duration}}",
     "note_unmapped": "{{models}} は価格が未登録です。トークンは集計されますが費用は含まれません。",
+    "unpriced": "算出不可",
+    "unpriced_hint": "使用量は記録されていますが、このモデルの価格が未登録のため費用に含まれていません。",
+    "unpriced_rows_other": "{{count}} 件は算出不可",
     "note_estimate": "費用は公開モデル料金からの概算です（プロバイダーが独自の費用を返した分を除く）。"
   },
   "terminate_dialog": {

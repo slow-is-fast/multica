@@ -479,30 +479,45 @@ describe("execution log past runs", () => {
 
 describe("IssueRunsTotal pricing", () => {
   afterEach(() => {
+    // Unmount first: resetting the store with the component still mounted is
+    // a state update outside `act`, which is every "not wrapped in act"
+    // warning this suite used to print.
+    cleanup();
     useCustomPricingStore.setState({ pricings: {} });
   });
+
+  // No rate on file, and tokens that need one.
+  const unpricedRow: TaskUsage = {
+    provider: "acme",
+    model: "totally-made-up-model",
+    input_tokens: 1_000_000,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+  };
+  // Priced through a custom rate set by the test, so the dollar figure is
+  // predictable without depending on the maintained table.
+  const pricedRow: TaskUsage = {
+    ...unpricedRow,
+    model: "acme-priced-model",
+  };
 
   it("recomputes when a custom model rate is saved", () => {
     // `estimateCost` reads the custom-rate store imperatively, so nothing
     // re-renders this on a rate change unless the component subscribes. Before
     // that subscription existed the figure stayed stale until the task list
     // happened to refetch.
-    const unpriced: TaskUsage = {
-      provider: "acme",
-      model: "totally-made-up-model",
-      input_tokens: 1_000_000,
-      output_tokens: 0,
-      cache_read_tokens: 0,
-      cache_write_tokens: 0,
-    };
-    const task = makeTask({ status: "completed", usage: [unpriced] });
+    const task = makeTask({ status: "completed", usage: [unpricedRow] });
 
     renderWithI18n(
       <IssueRunsTotal tasks={[task]} alone onOpen={() => {}} />,
     );
 
-    // No rate on file for this model yet.
-    expect(screen.getByText("$0.00")).toBeInTheDocument();
+    // No rate on file for this model yet — so there is no figure to show,
+    // and saying "$0.00" would claim this issue was free. What the reader
+    // gets instead is how many rows are missing from a total they cannot see.
+    expect(screen.queryByText(/^\$/)).not.toBeInTheDocument();
+    expect(screen.getByText(/1 row unpriced/)).toBeInTheDocument();
 
     act(() => {
       useCustomPricingStore.getState().setCustomPricing("acme/totally-made-up-model", {
@@ -513,7 +528,55 @@ describe("IssueRunsTotal pricing", () => {
       });
     });
 
-    // 1M input tokens at $7/M, without any refetch.
+    // 1M input tokens at $7/M, without any refetch — and now that every row
+    // is priced, the caveat goes away with the reason for it.
     expect(screen.getByText("$7.00")).toBeInTheDocument();
+    expect(screen.queryByText(/unpriced/)).not.toBeInTheDocument();
+  });
+
+  it("shows the amount and the unpriced count together when only some rows are priced", () => {
+    // The common case, and the one the criterion is about: the total is real
+    // but incomplete, so it must not be presented as whole.
+    act(() => {
+      useCustomPricingStore.getState().setCustomPricing("acme/acme-priced-model", {
+        input: 2,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+      });
+    });
+    const tasks = [
+      makeTask({ id: "priced", status: "completed", usage: [pricedRow] }),
+      makeTask({ id: "unknown", status: "completed", usage: [unpricedRow] }),
+    ];
+
+    renderWithI18n(<IssueRunsTotal tasks={tasks} alone onOpen={() => {}} />);
+
+    // $2.00 = 1M input tokens at $2/M, from the priced row only.
+    expect(screen.getByText("$2.00")).toBeInTheDocument();
+    expect(screen.getByText(/1 row unpriced/)).toBeInTheDocument();
+  });
+
+  it("keeps a figure for an all-unpriced run the provider partly billed", () => {
+    // The trap: a row the provider billed only PARTLY is unpriced (its
+    // remaining tokens have no rate) but owes real money. Dropping it from
+    // the total would throw away money that was actually charged.
+    const task = makeTask({
+      status: "completed",
+      // `uncosted_*` set explicitly: a row with a bill but no split is read
+      // as priced in full, and this row is billed only partly.
+      usage: [
+        {
+          ...unpricedRow,
+          cost_usd_ticks: 5_000_000_000,
+          uncosted_input_tokens: 1_000_000,
+        },
+      ],
+    });
+
+    renderWithI18n(<IssueRunsTotal tasks={[task]} alone onOpen={() => {}} />);
+
+    expect(screen.getByText("$0.50")).toBeInTheDocument();
+    expect(screen.getByText(/1 row unpriced/)).toBeInTheDocument();
   });
 });

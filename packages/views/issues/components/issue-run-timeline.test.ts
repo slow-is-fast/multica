@@ -122,6 +122,98 @@ describe("buildRunTimeline", () => {
     expect(timeline.pricedCount).toBe(0);
   });
 
+  // A model no price table carries. Its tokens are real; its money is not.
+  const unpricedRow: TaskUsage = {
+    provider: "acme",
+    model: "totally-made-up-model",
+    input_tokens: 1_000_000,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+  };
+
+  it("counts the rows it could not price instead of pricing them as zero", () => {
+    const timeline = buildRunTimeline(
+      [
+        makeTask({ id: "priced", usage: usage(200_000) }),
+        makeTask({
+          id: "unknown",
+          started_at: "2026-09-24T11:00:00",
+          completed_at: "2026-09-24T11:30:00",
+          usage: [unpricedRow],
+        }),
+      ],
+      NOW,
+    );
+
+    expect(timeline.unpricedRowCount).toBe(1);
+    // Only one of the two runs has a figure. The unknown one recorded usage,
+    // so counting it here is what used to let an unpriced issue show "$0.00".
+    expect(timeline.pricedCount).toBe(1);
+    expect(timeline.runs.find((r) => r.task.id === "unknown")!.priced).toBe(false);
+    // The total is the money we can account for — $5 — and it is incomplete,
+    // which is the whole reason the count above exists.
+    expect(timeline.totalCost).toBe(5);
+  });
+
+  it("withholds the figure entirely when nothing could be priced", () => {
+    const timeline = buildRunTimeline([makeTask({ usage: [unpricedRow] })], NOW);
+    expect(timeline.unpricedRowCount).toBe(1);
+    expect(timeline.pricedCount).toBe(0);
+    expect(timeline.totalCost).toBe(0);
+  });
+
+  it("keeps the figure for an all-unpriced run the provider partly billed", () => {
+    // A row the provider billed only PARTLY is unpriced — its remaining
+    // tokens have no rate — but its billed half is real money. Dropping it
+    // would understate the issue more than showing an incomplete figure does.
+    const timeline = buildRunTimeline(
+      [
+        makeTask({
+          usage: [
+            {
+              ...unpricedRow,
+              cost_usd_ticks: 5_000_000_000,
+              uncosted_input_tokens: 1_000_000,
+            },
+          ],
+        }),
+      ],
+      NOW,
+    );
+
+    expect(timeline.unpricedRowCount).toBe(1);
+    expect(timeline.pricedCount).toBe(1);
+    expect(timeline.totalCost).toBeCloseTo(0.5, 6);
+  });
+
+  it("counts a free tier as a figure, not as a gap", () => {
+    // The other side of the same distinction: an all-zero rate row is known
+    // free, so it belongs in the total as a real 0 and must NOT raise
+    // "we couldn't price this". A missing row would.
+    const timeline = buildRunTimeline(
+      [
+        makeTask({
+          usage: [
+            {
+              provider: "zhipu",
+              model: "glm-4.5-flash",
+              input_tokens: 1_000_000,
+              output_tokens: 1_000_000,
+              cache_read_tokens: 0,
+              cache_write_tokens: 0,
+            },
+          ],
+        }),
+      ],
+      NOW,
+    );
+
+    expect(timeline.unpricedRowCount).toBe(0);
+    expect(timeline.pricedCount).toBe(1);
+    expect(timeline.totalCost).toBe(0);
+  });
+
   it("splits a run's cost by what was billed", () => {
     const timeline = buildRunTimeline([makeTask({ usage: usage(1_000_000) })], NOW);
     expect(timeline.runs[0]!.breakdown).toEqual({ input: 0, output: 25, cacheRead: 0, cacheWrite: 0 });

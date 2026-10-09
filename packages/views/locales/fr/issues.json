@@ -800,6 +800,10 @@
     "hover_no_run": "Aucune exécution",
     "hover_idle": "Inactif {{duration}}",
     "note_unmapped": "Aucun tarif connu pour {{models}} ; leurs tokens sont comptés, mais pas leur coût.",
+    "unpriced": "non tarifé",
+    "unpriced_hint": "Utilisation enregistrée, mais aucun tarif pour ce modèle : son coût n'est pas compté.",
+    "unpriced_rows_one": "{{count}} ligne non tarifée",
+    "unpriced_rows_other": "{{count}} lignes non tarifées",
     "note_estimate": "Le coût est estimé d'après les tarifs publiés des modèles, sauf lorsque le fournisseur a communiqué son propre chiffre."
   },
   "terminate_dialog": {
