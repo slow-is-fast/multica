@@ -206,6 +206,17 @@ function RunStats({ timeline }: { timeline: RunTimeline }) {
           </span>
         )}
       </Stat>
+      {/* The other half of "what did this issue cost", placed next to it on
+          purpose. Cost alone cannot say whether a rise came from more tokens
+          or from a dearer model, and a single aggregate token count is the
+          thing that hides cache read being the largest category. Tokens are
+          counted whether or not they could be priced — which is exactly how
+          the unpriced count above stays meaningful. */}
+      <Stat label={t(($) => $.runs_timeline.stat_tokens)}>
+        <span className="text-title-sm font-medium">
+          {timeline.totalTokens > 0 ? formatTokens(timeline.totalTokens) : "—"}
+        </span>
+      </Stat>
       <Stat label={t(($) => $.runs_timeline.stat_agent_time)}>
         <span className="text-title-sm font-medium">
           {formatDuration(timeline.agentMs / 1000, UNDER_A_SECOND)}
@@ -656,6 +667,12 @@ function RunHoverCard({ run }: { run: TimelineRun }) {
               ? t(($) => $.runs_timeline.unpriced)
               : t(($) => $.runs_timeline.no_usage)}
         </span>
+        {run.usage && (
+          <span className="text-muted-foreground">
+            {" · "}
+            {formatTokens(run.usage.tokens)}
+          </span>
+        )}
         <span className="text-muted-foreground">
           {" · "}
           {t(($) => $.runs_timeline.tooltip_total, { cost: formatUsd(run.costSoFar) })}
@@ -753,7 +770,14 @@ function RunDayList({ timeline, issueId }: { timeline: RunTimeline; issueId: str
               {[
                 t(($) => $.runs_timeline.day_runs, { count: group.runs.length }),
                 group.agentMs > 0 ? formatDuration(group.agentMs / 1000, UNDER_A_SECOND) : null,
-                group.runs.some((r) => r.usage) ? formatUsd(group.cost) : null,
+                // Same three states as a run's own row: a day whose usage
+                // could not be priced is not a day that was free.
+                group.priced
+                  ? formatUsd(group.cost)
+                  : group.runs.some((r) => r.usage)
+                    ? t(($) => $.runs_timeline.unpriced)
+                    : null,
+                group.tokens > 0 ? formatTokens(group.tokens) : null,
               ]
                 .filter(Boolean)
                 .join(" · ")}

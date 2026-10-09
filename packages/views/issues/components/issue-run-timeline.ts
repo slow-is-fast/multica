@@ -71,6 +71,13 @@ export interface RunTimeline {
   runs: TimelineRun[];
   totalCost: number;
   /**
+   * Tokens consumed across the issue, priced or not. Shown next to the cost
+   * so the two dimensions read together: a day whose tokens doubled while its
+   * cost tripled is a model-mix story, not a volume story, and neither figure
+   * alone says which.
+   */
+  totalTokens: number;
+  /**
    * Runs with a cost figure to show — not "runs that recorded usage".
    *
    * A run whose every row is unpriced recorded usage and still has no
@@ -155,6 +162,7 @@ export function buildRunTimeline(tasks: readonly AgentTask[], nowMs: number): Ru
     .toSorted((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
 
   let totalCost = 0;
+  let totalTokens = 0;
   let pricedCount = 0;
   let unpricedRowCount = 0;
   let agentMs = 0;
@@ -178,6 +186,7 @@ export function buildRunTimeline(tasks: readonly AgentTask[], nowMs: number): Ru
     // it was a 0 opening the gate and letting "$0.00" read as "free".
     if (run.usage) {
       totalCost += run.usage.cost;
+      totalTokens += run.usage.tokens;
       maxRunCost = Math.max(maxRunCost, run.usage.cost);
     }
     if (run.durationMs != null) agentMs += run.durationMs;
@@ -214,6 +223,7 @@ export function buildRunTimeline(tasks: readonly AgentTask[], nowMs: number): Ru
   return {
     runs,
     totalCost,
+    totalTokens,
     pricedCount,
     unpricedRowCount,
     agentMs,
@@ -408,6 +418,10 @@ export interface RunDayGroup {
   runs: TimelineRun[];
   cost: number;
   agentMs: number;
+  /** Tokens consumed, priced or not — the other half of "what did this day cost". */
+  tokens: number;
+  /** Whether any run that day has a cost figure, as opposed to mere usage. */
+  priced: boolean;
 }
 
 /** Newest day first, newest run first — the order people scan a log in. */
@@ -419,11 +433,13 @@ export function groupRunsByDay(runs: readonly TimelineRun[]): RunDayGroup[] {
     const key = day.getTime();
     let group = groups.get(key);
     if (!group) {
-      group = { dayMs: key, runs: [], cost: 0, agentMs: 0 };
+      group = { dayMs: key, runs: [], cost: 0, agentMs: 0, tokens: 0, priced: false };
       groups.set(key, group);
     }
     group.runs.push(run);
     group.cost += run.usage?.cost ?? 0;
+    group.tokens += run.usage?.tokens ?? 0;
+    if (run.priced) group.priced = true;
     group.agentMs += run.durationMs ?? 0;
   }
   return Array.from(groups.values());

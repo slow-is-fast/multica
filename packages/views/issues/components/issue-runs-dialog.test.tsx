@@ -121,7 +121,8 @@ describe("IssueRunsDialog", () => {
     const today = screen.getByRole("region", { name: "Today" });
     const yesterday = screen.getByRole("region", { name: "Yesterday" });
     expect(within(today).getByText("Newer run")).toBeInTheDocument();
-    expect(within(today).getByText("1 run · 30m · $25.00")).toBeInTheDocument();
+    // Tokens ride along with the cost: the day's figure reads as both.
+    expect(within(today).getByText("1 run · 30m · $25.00 · 1M")).toBeInTheDocument();
     expect(within(yesterday).getByText("Older run")).toBeInTheDocument();
     expect(
       today.compareDocumentPosition(yesterday) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -302,8 +303,30 @@ describe("IssueRunsDialog", () => {
     expect(screen.queryByText("claude-opus-5")).not.toBeInTheDocument();
 
     fireEvent.click(button);
-    expect(screen.getByText("claude-opus-5")).toBeInTheDocument();
-    expect(screen.getByText("1M")).toBeInTheDocument();
+    const models = screen.getByText("claude-opus-5");
+    expect(models).toBeInTheDocument();
+    // Scoped to the popover: the day header now carries a token figure too,
+    // so an unscoped "1M" is ambiguous.
+    expect(within(models.parentElement!).getByText("1M")).toBeInTheDocument();
+  });
+
+  it("calls a day unpriced rather than free when its usage has no rate", () => {
+    // The day header needs the same three states a run's row does. Asserted
+    // as the whole string on purpose: `queryByText("$0.00")` cannot see a
+    // figure that is one segment of a longer line, so the obvious assertion
+    // passes while the header reads "this day was free".
+    open([makeTask({ usage: [usage({ provider: "acme", model: "made-up-model" })] })]);
+
+    expect(screen.getByText("1 run · 30m · unpriced · 1M")).toBeInTheDocument();
+  });
+
+  it("reports a day's tokens next to its cost", () => {
+    // The cost dimension and the token dimension read together, because a
+    // cost figure alone cannot say whether a rise came from more tokens or
+    // from a dearer model.
+    open([makeTask({ usage: [usage({ output_tokens: 1_000_000 })] })]);
+
+    expect(screen.getByText("1 run · 30m · $25.00 · 1M")).toBeInTheDocument();
   });
 
   it("names a wakeup run by its rule, not as a quote", () => {

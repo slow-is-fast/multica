@@ -775,6 +775,7 @@
     "stat_agent_time": "Agent time",
     "stat_elapsed": "Elapsed",
     "stat_runs": "Runs",
+    "stat_tokens": "Tokens",
     "count_failed_one": "{{count}} failed",
     "count_failed_other": "{{count}} failed",
     "count_cancelled_one": "{{count}} cancelled",

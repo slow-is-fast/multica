@@ -775,6 +775,7 @@
     "stat_agent_time": "Travail d'agent",
     "stat_elapsed": "Écoulé",
     "stat_runs": "Exécutions",
+    "stat_tokens": "Jetons",
     "count_failed_one": "{{count}} en échec",
     "count_failed_other": "{{count}} en échec",
     "count_cancelled_one": "{{count}} annulée",

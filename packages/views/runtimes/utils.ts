@@ -645,9 +645,15 @@ export interface TaskUsageSummary {
    * what makes an unpriced issue read as a free one.
    *
    * True when any row was priced OR the cost is non-zero. That second clause
-   * matters: a row the provider billed only PARTLY is unpriced (its remaining
-   * tokens have no rate) yet its billed half is real money, and hiding it
-   * would understate the issue more than showing an incomplete figure does.
+   * covers a row the provider billed only PARTLY: it is unpriced (its
+   * remaining tokens have no rate) yet its billed half is real money, and
+   * hiding it would understate the issue more than showing an incomplete
+   * figure does.
+   *
+   * It cannot fire on run usage today — `TaskUsage` carries no `uncosted_*`
+   * split, so every billed row is billed in full and reads as `provider`.
+   * `RuntimeUsage` does carry the split, and this is here for the day run
+   * usage gets it too.
    */
   priced: boolean;
   /** Rows that could not be priced. Counted; charging nothing. */

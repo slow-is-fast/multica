@@ -1151,6 +1151,49 @@ describe("isUsageRowUnpriced", () => {
   });
 });
 
+describe("summarizeTaskUsage priced", () => {
+  it("keeps a figure for a row the provider billed only partly", () => {
+    // Reachable only where rows carry the `uncosted_*` split (RuntimeUsage).
+    // `TaskUsage` — what the run timeline is fed — does not, so a billed row
+    // there is billed in full and this state never arises today. The guard is
+    // here for the moment the split reaches run usage: without it, a partly
+    // billed row would be dropped from the total along with its real money.
+    const summary = summarizeTaskUsage([
+      {
+        model: "totally-unknown-model",
+        provider: "acme",
+        input_tokens: 1_000_000,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        cost_usd_ticks: 5_000_000_000,
+        uncosted_input_tokens: 1_000_000,
+      },
+    ]);
+
+    expect(summary!.unpricedRows).toBe(1);
+    expect(summary!.priced).toBe(true);
+    expect(summary!.cost).toBeCloseTo(0.5, 6);
+  });
+
+  it("withholds the figure when every row is unpriced and nothing was billed", () => {
+    const summary = summarizeTaskUsage([
+      {
+        model: "totally-unknown-model",
+        provider: "acme",
+        input_tokens: 1_000_000,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+      },
+    ]);
+
+    expect(summary!.unpricedRows).toBe(1);
+    expect(summary!.priced).toBe(false);
+    expect(summary!.cost).toBe(0);
+  });
+});
+
 describe("user-supplied custom pricing", () => {
   it("prices a model the maintained catalog doesn't ship", () => {
     useCustomPricingStore.getState().setCustomPricing("gpt-5.5-mini", {

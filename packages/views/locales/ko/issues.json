@@ -745,6 +745,7 @@
     "stat_agent_time": "에이전트 작업",
     "stat_elapsed": "경과 시간",
     "stat_runs": "실행",
+    "stat_tokens": "토큰",
     "count_failed_other": "실패 {{count}}회",
     "count_cancelled_other": "취소 {{count}}회",
     "count_active_other": "진행 중 {{count}}회",

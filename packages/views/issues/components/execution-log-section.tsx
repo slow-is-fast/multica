@@ -432,6 +432,10 @@ function SparklineRunSummary({ run }: { run: TimelineRun }) {
       <span className="text-micro text-muted-foreground">
         {[
           cost,
+          // Tokens sit next to the cost on purpose: the two answer different
+          // questions, and a cost figure alone invites optimising the wrong
+          // line item.
+          run.usage ? formatTokens(run.usage.tokens) : null,
           run.durationMs != null ? formatAgentTime(run.durationMs / 1000, "0s") : null,
           run.task.status === "completed" ? null : status,
         ]

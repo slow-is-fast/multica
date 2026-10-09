@@ -557,26 +557,18 @@ describe("IssueRunsTotal pricing", () => {
     expect(screen.getByText(/1 row unpriced/)).toBeInTheDocument();
   });
 
-  it("keeps a figure for an all-unpriced run the provider partly billed", () => {
-    // The trap: a row the provider billed only PARTLY is unpriced (its
-    // remaining tokens have no rate) but owes real money. Dropping it from
-    // the total would throw away money that was actually charged.
+  it("treats a row the provider billed as priced, rate or no rate", () => {
+    // `TaskUsage` carries no `uncosted_*` split, so a billed row is a bill in
+    // full: it has a figure and it must not raise "we couldn't price this",
+    // even though the rate table has never heard of the model.
     const task = makeTask({
       status: "completed",
-      // `uncosted_*` set explicitly: a row with a bill but no split is read
-      // as priced in full, and this row is billed only partly.
-      usage: [
-        {
-          ...unpricedRow,
-          cost_usd_ticks: 5_000_000_000,
-          uncosted_input_tokens: 1_000_000,
-        },
-      ],
+      usage: [{ ...unpricedRow, cost_usd_ticks: 5_000_000_000 }],
     });
 
     renderWithI18n(<IssueRunsTotal tasks={[task]} alone onOpen={() => {}} />);
 
     expect(screen.getByText("$0.50")).toBeInTheDocument();
-    expect(screen.getByText(/1 row unpriced/)).toBeInTheDocument();
+    expect(screen.queryByText(/unpriced/)).not.toBeInTheDocument();
   });
 });

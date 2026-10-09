@@ -745,6 +745,7 @@
     "stat_agent_time": "エージェント作業",
     "stat_elapsed": "経過時間",
     "stat_runs": "実行回数",
+    "stat_tokens": "トークン",
     "count_failed_other": "失敗 {{count}}",
     "count_cancelled_other": "キャンセル {{count}}",
     "count_active_other": "進行中 {{count}}",

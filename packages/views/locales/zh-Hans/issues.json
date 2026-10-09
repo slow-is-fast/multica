@@ -745,6 +745,7 @@
     "stat_agent_time": "智能体工作",
     "stat_elapsed": "历时",
     "stat_runs": "运行次数",
+    "stat_tokens": "Token",
     "count_failed_other": "{{count}} 次失败",
     "count_cancelled_other": "{{count}} 次取消",
     "count_active_other": "{{count}} 次进行中",

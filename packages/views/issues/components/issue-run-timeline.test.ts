@@ -163,28 +163,32 @@ describe("buildRunTimeline", () => {
     expect(timeline.totalCost).toBe(0);
   });
 
-  it("keeps the figure for an all-unpriced run the provider partly billed", () => {
-    // A row the provider billed only PARTLY is unpriced — its remaining
-    // tokens have no rate — but its billed half is real money. Dropping it
-    // would understate the issue more than showing an incomplete figure does.
+  it("treats a row the provider billed as priced, rate or no rate", () => {
+    // `TaskUsage` carries no `uncosted_*` split, so a row with a bill is
+    // billed in full: real money the rate table knows nothing about, and it
+    // must not be counted as a gap in the total.
+    const timeline = buildRunTimeline(
+      [makeTask({ usage: [{ ...unpricedRow, cost_usd_ticks: 5_000_000_000 }] })],
+      NOW,
+    );
+
+    expect(timeline.unpricedRowCount).toBe(0);
+    expect(timeline.pricedCount).toBe(1);
+    expect(timeline.totalCost).toBeCloseTo(0.5, 6);
+  });
+
+  it("totals the issue's tokens whether or not they could be priced", () => {
+    // The other dimension, and the reason it is counted separately: an
+    // unpriced row's tokens are real, only its money is missing.
     const timeline = buildRunTimeline(
       [
-        makeTask({
-          usage: [
-            {
-              ...unpricedRow,
-              cost_usd_ticks: 5_000_000_000,
-              uncosted_input_tokens: 1_000_000,
-            },
-          ],
-        }),
+        makeTask({ id: "priced", usage: usage(200_000) }),
+        makeTask({ id: "unknown", usage: [unpricedRow] }),
       ],
       NOW,
     );
 
-    expect(timeline.unpricedRowCount).toBe(1);
-    expect(timeline.pricedCount).toBe(1);
-    expect(timeline.totalCost).toBeCloseTo(0.5, 6);
+    expect(timeline.totalTokens).toBe(200_000 + 1_000_000);
   });
 
   it("counts a free tier as a figure, not as a gap", () => {
