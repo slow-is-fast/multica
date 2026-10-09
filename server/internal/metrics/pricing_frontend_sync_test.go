@@ -266,15 +266,13 @@ func TestFrontendPricingCoverageGapIsOnlyTheKnownSet(t *testing.T) {
 // resolvability). Shrinking either list is a win and just needs the constant
 // updated; growing it is exactly what this test exists to stop.
 var knownFrontendOnly = []string{
-	"claude-haiku-3-5", "claude-opus-4", "claude-opus-4-1", "claude-sonnet-4",
 	"cursor", "cursor/auto", "cursor/composer-1", "cursor/composer-1.5",
 	"cursor/composer-2", "cursor/composer-2-fast", "cursor/composer-2.5",
 	"cursor/composer-2.5-fast",
 	"glm-4.5", "glm-4.5-air", "glm-4.5-airx", "glm-4.5-flash", "glm-4.5-x",
 	"glm-4.6", "glm-4.7", "glm-4.7-flash", "glm-4.7-flashx",
 	"glm-5-turbo", "glm-5.1",
-	"gpt-4o", "gpt-4o-mini", "gpt-5", "gpt-5-codex", "gpt-5-mini", "gpt-5-nano",
-	"kimi-k2.6", "o3", "o3-mini", "o4-mini",
+	"kimi-k2.6",
 }
 
 var knownServerOnly = []string{

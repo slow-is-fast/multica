@@ -54,6 +54,24 @@ var modelPrices = map[string]ModelPrice{
 	"openai:gpt-5.4-mini":  {Provider: "openai", Model: "gpt-5.4-mini", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.75, OutputPerM: 4.50},
 	"openai:gpt-5.3-codex": {Provider: "openai", Model: "gpt-5.3-codex", InputPerM: 1.75, CacheReadPerM: 0.175, CacheWritePerM: 1.75, OutputPerM: 14.00},
 	"openai:gpt-5.2-codex": {Provider: "openai", Model: "gpt-5.2-codex", InputPerM: 1.75, CacheReadPerM: 0.175, CacheWritePerM: 1.75, OutputPerM: 14.00},
+	// GPT-5 family, o-series and GPT-4o (ruel#44): the dashboard has carried
+	// these all along while the Go table did not, so every one of them was a
+	// row the UI priced and the budget gate called unpriced.
+	//
+	// `gpt-5` and `gpt-5-codex` share rates but are separate SKUs, and both are
+	// priced 5x `gpt-5-mini` and 25x `gpt-5-nano`. That spread is the whole
+	// reason these rules must END: `gpt-5` as a bare substring would swallow
+	// `gpt-5-mini` and bill it at five times its real rate, silently. Same for
+	// `gpt-4o` and `gpt-4o-mini` (16x) and `o3` / `o3-mini`.
+	"openai:gpt-5":       {Provider: "openai", Model: "gpt-5", InputPerM: 1.25, CacheReadPerM: 0.125, CacheWritePerM: 1.25, OutputPerM: 10.00},
+	"openai:gpt-5-codex": {Provider: "openai", Model: "gpt-5-codex", InputPerM: 1.25, CacheReadPerM: 0.125, CacheWritePerM: 1.25, OutputPerM: 10.00},
+	"openai:gpt-5-mini":  {Provider: "openai", Model: "gpt-5-mini", InputPerM: 0.25, CacheReadPerM: 0.025, CacheWritePerM: 0.25, OutputPerM: 2.00},
+	"openai:gpt-5-nano":  {Provider: "openai", Model: "gpt-5-nano", InputPerM: 0.05, CacheReadPerM: 0.005, CacheWritePerM: 0.05, OutputPerM: 0.40},
+	"openai:o3":          {Provider: "openai", Model: "o3", InputPerM: 2.00, CacheReadPerM: 0.50, CacheWritePerM: 2.00, OutputPerM: 8.00},
+	"openai:o3-mini":     {Provider: "openai", Model: "o3-mini", InputPerM: 1.10, CacheReadPerM: 0.55, CacheWritePerM: 1.10, OutputPerM: 4.40},
+	"openai:o4-mini":     {Provider: "openai", Model: "o4-mini", InputPerM: 1.10, CacheReadPerM: 0.275, CacheWritePerM: 1.10, OutputPerM: 4.40},
+	"openai:gpt-4o":      {Provider: "openai", Model: "gpt-4o", InputPerM: 2.50, CacheReadPerM: 1.25, CacheWritePerM: 2.50, OutputPerM: 10.00},
+	"openai:gpt-4o-mini": {Provider: "openai", Model: "gpt-4o-mini", InputPerM: 0.15, CacheReadPerM: 0.075, CacheWritePerM: 0.15, OutputPerM: 0.60},
 	// Anthropic's Sonnet 5 launch price is $2 / $10 through 2026-08-31. This
 	// static table cannot schedule the published post-intro $3 / $15 change yet,
 	// so keep the intro rate here and update the row when catalog support exists.
@@ -69,6 +87,15 @@ var modelPrices = map[string]ModelPrice{
 	"anthropic:claude-sonnet-4.6": {Provider: "anthropic", Model: "claude-sonnet-4.6", InputPerM: 3.00, CacheReadPerM: 0.30, CacheWritePerM: 3.75, OutputPerM: 15.00},
 	"anthropic:claude-sonnet-4.5": {Provider: "anthropic", Model: "claude-sonnet-4.5", InputPerM: 3.00, CacheReadPerM: 0.30, CacheWritePerM: 3.75, OutputPerM: 15.00},
 	"anthropic:claude-haiku-4.5":  {Provider: "anthropic", Model: "claude-haiku-4.5", InputPerM: 1.00, CacheReadPerM: 0.10, CacheWritePerM: 1.25, OutputPerM: 5.00},
+	// Pre-4.5 generations the dashboard has always carried and the Go table did
+	// not (ruel#44). Opus 4 and 4.1 sit on the original $15 / $75 tier — nearly
+	// three times Opus 4.5's — so an unanchored `claude-opus-4` rule would
+	// over-bill every later Opus 4.x by 3x. That is the same tier-borrowing
+	// trap as Fable 5 / 5.1, and it is why both rules end at versionEnd.
+	"anthropic:claude-opus-4.1":   {Provider: "anthropic", Model: "claude-opus-4.1", InputPerM: 15.00, CacheReadPerM: 1.50, CacheWritePerM: 18.75, OutputPerM: 75.00},
+	"anthropic:claude-opus-4":     {Provider: "anthropic", Model: "claude-opus-4", InputPerM: 15.00, CacheReadPerM: 1.50, CacheWritePerM: 18.75, OutputPerM: 75.00},
+	"anthropic:claude-sonnet-4":   {Provider: "anthropic", Model: "claude-sonnet-4", InputPerM: 3.00, CacheReadPerM: 0.30, CacheWritePerM: 3.75, OutputPerM: 15.00},
+	"anthropic:claude-haiku-3.5":  {Provider: "anthropic", Model: "claude-haiku-3.5", InputPerM: 0.80, CacheReadPerM: 0.08, CacheWritePerM: 1.00, OutputPerM: 4.00},
 	"deepseek:v4-pro":             {Provider: "deepseek", Model: "v4-pro", InputPerM: 1.74, CacheReadPerM: 0.0145, CacheWritePerM: 1.74, OutputPerM: 3.48},
 	"deepseek:v4-flash":           {Provider: "deepseek", Model: "v4-flash", InputPerM: 0.56, CacheReadPerM: 0.0112, CacheWritePerM: 0.56, OutputPerM: 1.12},
 	"minimax:m2.7":                {Provider: "minimax", Model: "m2.7", InputPerM: 0.30, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 1.20},
@@ -142,21 +169,30 @@ var modelPrices = map[string]ModelPrice{
 	// a guessed rate (same convention as xAI's `grok-composer-*`).
 }
 
-// claudeVersionEnd terminates a Claude family rule: at most one suffix that
-// the frontend resolver normalizes away, and then the END of the id. Appending
-// it keeps a rule from swallowing a later SKU in the same family — without it
+// versionEnd terminates a family rule: at most one suffix the frontend
+// resolver normalizes away, and then the END of the id. Appending it keeps a
+// rule from swallowing a later SKU in the same family — without it
 // `claude-fable-5` also matches `claude-fable-5-1`, whose cache reads are a
-// quarter of Fable 5's, so those reads bill at 4x.
+// quarter of Fable 5's, so those reads bill at 4x. The same trap is why
+// `gpt-5` must end here too: as a bare substring it would price `gpt-5-mini`
+// at five times its real rate.
 //
-// The admitted suffixes are exactly what `stripContextTag` and `stripDate`
-// remove in packages/views/runtimes/utils.ts before its exact-key lookup, so
-// both sides accept the same suffix forms. (Only the suffixes: the Claude
-// rules are still substring matches, so a malformed PREFIX is out of scope
-// here.) The trailing `$` is what makes that true and is not optional: these rules are substring matches, so an
-// alternative that merely starts a suffix still matches when arbitrary text
-// follows it (`claude-fable-5-1-latest-preview`, `claude-fable-5-1[1m]junk`),
-// which is the silent tier-borrowing this constant exists to prevent. The
-// bracket form requires a complete tag for the same reason.
+// It is NOT Anthropic-specific despite the Claude examples: the admitted
+// suffixes are exactly what `stripContextTag` and `stripDate` remove in
+// packages/views/runtimes/utils.ts before its exact-key lookup, and the
+// frontend strips them for every provider, OpenAI included. A server rule
+// anchored at a bare `$` therefore leaves a dated id (`gpt-5-2025-08-07`)
+// unpriced on this side while the dashboard prices it — a gap in the opposite
+// direction, and the harder one to notice because neither guard compares
+// dated ids.
+//
+// (Only the suffixes: most rules here are substring matches, so a malformed
+// PREFIX is out of scope.) The trailing `$` is what makes that true and is
+// not optional: these rules are substring matches, so an alternative that
+// merely starts a suffix still matches when arbitrary text follows it
+// (`claude-fable-5-1-latest-preview`, `claude-fable-5-1[1m]junk`), which is
+// the silent tier-borrowing this constant exists to prevent. The bracket form
+// requires a complete tag for the same reason.
 //
 // A date snapshot carrying a context tag (`claude-fable-5-20260401[1m]`) is
 // covered by the tag-stripping retry in PriceForModelAlias, so it does not
@@ -166,7 +202,7 @@ var modelPrices = map[string]ModelPrice{
 // distinct SKU at an unknown rate and stays unmapped until it gets a row of
 // its own, the same "every catalog SKU needs its own row" rule the frontend
 // table states.
-const claudeVersionEnd = `(?:-20\d{6}|-20\d{2}-\d{2}-\d{2}|-latest|\[[^\]]+\])?$`
+const versionEnd = `(?:-20\d{6}|-20\d{2}-\d{2}-\d{2}|-latest|\[[^\]]+\])?$`
 
 var modelAliasRules = []struct {
 	re       *regexp.Regexp
@@ -191,19 +227,38 @@ var modelAliasRules = []struct {
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]4-mini($|[^a-z0-9])`), "openai:gpt-5.4-mini"},
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]3-codex$`), "openai:gpt-5.3-codex"},
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]2-codex$`), "openai:gpt-5.2-codex"},
+	// GPT-5 family, o-series and GPT-4o (ruel#44). All end at versionEnd, and
+	// the `$` half is not decoration: `gpt-5` alone is a substring of
+	// `gpt-5-mini` / `gpt-5-nano` / `gpt-5-codex`, which are 5x, 25x and 1x its
+	// rate respectively. Dropping the anchor would silently price a nano run at
+	// the flagship rate. `gpt-4o` / `gpt-4o-mini` (16x) and `o3` / `o3-mini`
+	// (2x) are the same trap.
+	//
+	// The suffix half keeps parity with the dashboard, which strips a trailing
+	// date or `latest` before looking the key up — so `gpt-5-2025-08-07` prices
+	// on both sides instead of only in the UI.
+	{regexp.MustCompile(`(^|/|:)gpt-5-mini` + versionEnd), "openai:gpt-5-mini"},
+	{regexp.MustCompile(`(^|/|:)gpt-5-nano` + versionEnd), "openai:gpt-5-nano"},
+	{regexp.MustCompile(`(^|/|:)gpt-5-codex` + versionEnd), "openai:gpt-5-codex"},
+	{regexp.MustCompile(`(^|/|:)gpt-5` + versionEnd), "openai:gpt-5"},
+	{regexp.MustCompile(`(^|/|:)o3-mini` + versionEnd), "openai:o3-mini"},
+	{regexp.MustCompile(`(^|/|:)o3` + versionEnd), "openai:o3"},
+	{regexp.MustCompile(`(^|/|:)o4-mini` + versionEnd), "openai:o4-mini"},
+	{regexp.MustCompile(`(^|/|:)gpt-4o-mini` + versionEnd), "openai:gpt-4o-mini"},
+	{regexp.MustCompile(`(^|/|:)gpt-4o` + versionEnd), "openai:gpt-4o"},
 	{regexp.MustCompile(`claude-sonnet-5|claude-5-sonnet`), "anthropic:claude-sonnet-5"},
 	// Fable 5.1 shares Fable 5's $10 / $50 and $12.50 cache write but prices
 	// cache reads at 0.025x input ($0.25) instead of the standard 0.1x, so it
 	// needs its own row, and both rules end at their own version
-	// (claudeVersionEnd) so neither can swallow the other's ids.
-	{regexp.MustCompile(`claude-fable-5[-.]1` + claudeVersionEnd), "anthropic:claude-fable-5-1"},
-	{regexp.MustCompile(`claude-fable-5` + claudeVersionEnd), "anthropic:claude-fable-5"},
+	// (versionEnd) so neither can swallow the other's ids.
+	{regexp.MustCompile(`claude-fable-5[-.]1` + versionEnd), "anthropic:claude-fable-5-1"},
+	{regexp.MustCompile(`claude-fable-5` + versionEnd), "anthropic:claude-fable-5"},
 	// Opus 5.5 is cheaper than Opus 5 ($4 / $20) and prices cache reads at
 	// 0.05x input, so the two need separate rows. Both rules end at their own
-	// version (claudeVersionEnd), the same as the Fable pair above, so the
+	// version (versionEnd), the same as the Fable pair above, so the
 	// Opus 5 rule cannot swallow 5.5 ids and bill them at Opus 5 rates.
-	{regexp.MustCompile(`claude-opus-5[-.]5` + claudeVersionEnd), "anthropic:claude-opus-5-5"},
-	{regexp.MustCompile(`claude-opus-5` + claudeVersionEnd), "anthropic:claude-opus-5"},
+	{regexp.MustCompile(`claude-opus-5[-.]5` + versionEnd), "anthropic:claude-opus-5-5"},
+	{regexp.MustCompile(`claude-opus-5` + versionEnd), "anthropic:claude-opus-5"},
 	{regexp.MustCompile(`claude-opus-4[-.]8`), "anthropic:claude-opus-4.8"},
 	{regexp.MustCompile(`claude-opus-4[-.]7`), "anthropic:claude-opus-4.7"},
 	{regexp.MustCompile(`claude-opus-4[-.]6`), "anthropic:claude-opus-4.6"},
@@ -211,6 +266,15 @@ var modelAliasRules = []struct {
 	{regexp.MustCompile(`claude-sonnet-4[-.]6|claude-4[-.]6-sonnet`), "anthropic:claude-sonnet-4.6"},
 	{regexp.MustCompile(`claude-sonnet-4[-.]5|claude-4[-.]5-sonnet`), "anthropic:claude-sonnet-4.5"},
 	{regexp.MustCompile(`claude-haiku-4[-.]5`), "anthropic:claude-haiku-4.5"},
+	// Pre-4.5 Anthropic (ruel#44). Every one of these ends at versionEnd, and
+	// that is load-bearing rather than tidy: `claude-opus-4` unanchored would
+	// match `claude-opus-4-1` through `claude-opus-4-8` and bill the whole 4.x
+	// range at $15 / $75 instead of $5 / $25 — a 3x over-bill on every Opus 4.5+
+	// run. `claude-sonnet-4` has the same trap against sonnet-4.5 / 4.6.
+	{regexp.MustCompile(`claude-opus-4[-.]1` + versionEnd), "anthropic:claude-opus-4.1"},
+	{regexp.MustCompile(`claude-opus-4` + versionEnd), "anthropic:claude-opus-4"},
+	{regexp.MustCompile(`claude-sonnet-4` + versionEnd), "anthropic:claude-sonnet-4"},
+	{regexp.MustCompile(`claude-haiku-3[-.]5` + versionEnd), "anthropic:claude-haiku-3.5"},
 	{regexp.MustCompile(`deepseek-v4-pro`), "deepseek:v4-pro"},
 	{regexp.MustCompile(`deepseek-v4-flash|^deepseek-chat$|^deepseek-reasoner$`), "deepseek:v4-flash"},
 	{regexp.MustCompile(`minimax-m2[.]7.*highspeed|highspeed.*minimax-m2[.]7`), "minimax:m2.7-highspeed"},
