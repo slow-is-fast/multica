@@ -89,6 +89,15 @@ type CommentSupplementResponse struct {
 	Status        string  `json:"status"`
 	FailureReason *string `json:"failure_reason,omitempty"`
 	DeliveredAt   *string `json:"delivered_at,omitempty"`
+	// AttemptCount 是「这条有没有被送出去过」的唯一判据，#42 的按钮靠它决定显不显示。
+	//
+	// status 只说「失败了」，说不出「失败之前有没有送出去过」——而这两件事的处置完全
+	// 相反：从未投递（0）可以安全重放，送出去过（>0）重放有可能让它被读两遍。不带这个
+	// 数，前端只能凭 failure_reason 猜，而 turn_ended 恰恰两类都会落到。
+	//
+	// 不用 omitempty：0 是这个字段最要紧的取值，省掉它等于把「从未投递」和「字段缺失」
+	// 混为一谈，前端又得回到猜。
+	AttemptCount int32 `json:"attempt_count"`
 }
 
 // listCommentSupplements groups every receipt by comment id, oldest first.
@@ -112,6 +121,7 @@ func (h *Handler) listCommentSupplements(ctx context.Context, workspaceID pgtype
 			Status:        row.Status,
 			FailureReason: textToPtr(row.FailureReason),
 			DeliveredAt:   timestampToPtr(row.DeliveredAt),
+			AttemptCount:  row.AttemptCount,
 		})
 	}
 	return out

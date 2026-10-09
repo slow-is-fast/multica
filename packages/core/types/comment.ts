@@ -65,6 +65,18 @@ export interface CommentSupplementReceipt {
   status: CommentSupplementStatus;
   failure_reason?: string;
   delivered_at?: string;
+  /**
+   * Whether this message was ever handed to the run before it failed.
+   *
+   * The only thing that separates "safe to replay" from "might be read twice":
+   * 0 means it was never claimed, so the agent never saw this text; >0 means a
+   * delivery attempt happened and the text may already be in the turn's context
+   * with a late ack. `status` alone cannot tell these apart — both land on
+   * `failed`. Servers that predate this field omit it; treat a missing value as
+   * unknown rather than 0, so an old server never shows a replay button it
+   * cannot honour.
+   */
+  attempt_count?: number;
 }
 
 // The domain result of one explicitly-mentioned trigger target. Success-shaped
