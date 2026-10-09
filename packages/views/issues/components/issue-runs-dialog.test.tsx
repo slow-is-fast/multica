@@ -358,4 +358,14 @@ describe("IssueRunsDialog", () => {
     expect(screen.getByRole("heading", { name: "运行记录" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "今天" })).toBeInTheDocument();
   });
+
+  it("says what it could not price in Simplified Chinese, keeping Token in English", () => {
+    // The copy has to be Chinese for the reader and keep the jargon as
+    // jargon: "Token" is a term of art, not a word to translate.
+    open([makeTask({ usage: [usage({ provider: "acme", model: "made-up-model" })] })], "zh-Hans");
+
+    expect(screen.getByText("已花费").parentElement).toHaveTextContent("有 1 条算不出");
+    expect(screen.getByText("Token")).toBeInTheDocument();
+    expect(screen.getByText("算不出")).toBeInTheDocument();
+  });
 });

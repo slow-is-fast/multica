@@ -985,6 +985,38 @@ describe("estimateCost", () => {
     ]);
   });
 
+  // The Issue-level half of the same criterion: every usage row of one real
+  // issue (RUEL-31 case1/3), priced the way the Issue page prices them.
+  //
+  // These counts are what `multica issue usage` reports for that issue —
+  // input 28058, output 1634, cache read 406528, cache write 0 — so the two
+  // halves of #43's "the Issue page must agree with the CLI" close here: the
+  // token total below is the CLI's, and the cost is the server's
+  // (TestEstimateUsageCostPricesARealIssuesRows pins 0.392574).
+  it("prices a whole real issue the way the server and the CLI do", () => {
+    const rows: Priceable[] = [
+      { model: "gpt-5.6-sol", provider: "codex", input_tokens: 14487, output_tokens: 696, cache_read_tokens: 108800, cache_write_tokens: 0, cost_usd_ticks: 0 },
+      { model: "gpt-5.6-sol", provider: "codex", input_tokens: 8753, output_tokens: 501, cache_read_tokens: 122752, cache_write_tokens: 0, cost_usd_ticks: 0 },
+      { model: "gpt-5.6-sol", provider: "codex", input_tokens: 2645, output_tokens: 303, cache_read_tokens: 102912, cache_write_tokens: 0, cost_usd_ticks: 0 },
+      { model: "gpt-5.6-sol", provider: "codex", input_tokens: 2173, output_tokens: 134, cache_read_tokens: 72064, cache_write_tokens: 0, cost_usd_ticks: 0 },
+    ];
+    const summary = summarizeTaskUsage(rows)!;
+
+    expect(summary.cost).toBeCloseTo(0.392574, 6);
+    expect(rows.map((r) => +estimateCost(r).toFixed(6))).toEqual([
+      0.147715, 0.120171, 0.073771, 0.050917,
+    ]);
+    // The CLI's own figures: 28058 + 1634 + 406528 + 0.
+    expect(summary.tokens).toBe(436_220);
+    expect(summary.input).toBe(28_058);
+    expect(summary.output).toBe(1_634);
+    expect(summary.cacheRead).toBe(406_528);
+    // Every row priced, so the Issue page owes the reader a figure and no
+    // "we couldn't price N rows" caveat.
+    expect(summary.priced).toBe(true);
+    expect(summary.unpricedRows).toBe(0);
+  });
+
   // The other half of the same criterion: a model neither table carries
   // must be reported as "cannot be priced", not as $0.00. The server
   // returns CostSourceUnpriced with Priceable() false; here the model has

@@ -765,3 +765,42 @@ func TestEstimateUsageCostPricesTheModelCodexNowReports(t *testing.T) {
 	t.Logf("same codex tokens: unknown prices to %v (source %q), gpt-5.6-sol to %.4f USD (source %q)",
 		before.USD, before.Source, after.USD, after.Source)
 }
+
+// The four usage rows of one real issue on this machine (RUEL-31 case1/3),
+// priced the way the Issue page prices them.
+//
+// This is the issue-level half of "one price list, one number" (ruel#39 →
+// #43): a whole issue's rows, not six hand-picked ones. The token counts are
+// what `multica issue usage` reports for that issue (input 28058, output
+// 1634, cache read 406528, cache write 0), so a mismatch here means the Issue
+// page and the CLI disagree about what the issue cost.
+//
+// Mirrored in packages/views/runtimes/utils.test.ts; both sides pin
+// 0.392574. Verified 2026-10-09.
+func TestEstimateUsageCostPricesARealIssuesRows(t *testing.T) {
+	type row struct{ in, out, cacheRead int64 }
+	rows := []row{
+		{14_487, 696, 108_800},
+		{8_753, 501, 122_752},
+		{2_645, 303, 102_912},
+		{2_173, 134, 72_064},
+	}
+
+	wantPerRow := []float64{0.147715, 0.120171, 0.073771, 0.050917}
+	const wantTotal = 0.392574
+
+	var total float64
+	for i, r := range rows {
+		got := EstimateUsageCost("gpt-5.6-sol", "codex", 0, r.in, r.out, r.cacheRead, 0)
+		if got.Source != CostSourceTable {
+			t.Fatalf("row %d: source = %q, want %q", i, got.Source, CostSourceTable)
+		}
+		if diff := got.USD - wantPerRow[i]; diff > 0.0000005 || diff < -0.0000005 {
+			t.Errorf("row %d: USD = %.6f, want %.6f", i, got.USD, wantPerRow[i])
+		}
+		total += got.USD
+	}
+	if diff := total - wantTotal; diff > 0.0000005 || diff < -0.0000005 {
+		t.Errorf("issue total = %.6f, want %.6f", total, wantTotal)
+	}
+}
