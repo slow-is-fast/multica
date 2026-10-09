@@ -1232,6 +1232,25 @@ export function useRetryTaskSupplement(issueId: string) {
   });
 }
 
+/**
+ * #42: hand a never-delivered additional message to the next run.
+ *
+ * The run it failed to reach is already over, so this is not a retry — it
+ * releases the binding that permanently excludes the comment from
+ * reconciliation and puts it back in the queue.
+ */
+export function useRequeueTaskSupplement(issueId: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ taskId, commentId }: { taskId: string; commentId: string }) =>
+      api.requeueTaskSupplement(issueId, taskId, commentId),
+    onSettled: () => {
+      client.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
+    },
+  });
+}
+
 export function useRetryIssueRun(issueId: string) {
   const client = useQueryClient();
   return useMutation({

@@ -2834,6 +2834,24 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Moves an undelivered additional message to the next run (#42).
+   *
+   * Distinct from `retryTaskSupplement`, which re-attempts delivery into the
+   * *same* run and therefore requires that run to still be running. This one is
+   * the exit for the case retry cannot cover: the run already ended.
+   */
+  async requeueTaskSupplement(
+    issueId: string,
+    taskId: string,
+    commentId: string,
+  ): Promise<{ requeued: boolean; dispatch: string; agent_id: string }> {
+    return this.fetch(
+      `/api/issues/${issueId}/tasks/${taskId}/supplements/${commentId}/requeue`,
+      { method: "POST" },
+    );
+  }
+
   async getIssueUsage(issueId: string): Promise<IssueUsageSummary> {
     return this.fetch(`/api/issues/${issueId}/usage`);
   }

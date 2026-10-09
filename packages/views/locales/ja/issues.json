@@ -33,7 +33,10 @@
     "steer_resend": "新しい実行として送信",
     "steer_resend_failed": "新しい実行として送信できませんでした。",
     "steer_step": "{{name}} が追加",
-    "steer_step_read": "既読"
+    "steer_step_read": "既読",
+    "supplement_requeue": "次の実行に回す",
+    "supplement_requeue_failed": "次の実行に回せませんでした。",
+    "supplement_requeue_done": "次の実行に回しました。"
   },
   "working_filter_error": {
     "title": "エージェントが作業中のタスクを読み込めませんでした"

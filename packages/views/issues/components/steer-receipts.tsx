@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, Check, CornerDownRight, Loader2, RotateCcw } from "lucide-react";
+import { AlertCircle, Check, CornerDownRight, Forward, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
-import { useCreateComment, useRetryTaskSupplement } from "@multica/core/issues/mutations";
+import { useCreateComment, useRequeueTaskSupplement, useRetryTaskSupplement } from "@multica/core/issues/mutations";
 import { api } from "@multica/core/api";
 import { issueKeys, issueTasksOptions } from "@multica/core/issues/queries";
 import { commentSupplementReceipts, isSupplementInFlight } from "@multica/core/issues/run-steering";
@@ -96,6 +96,7 @@ function SteerReceipt({ issueId, entry, receipt }: {
   const { t } = useT("issues");
   const { name, task } = useReceiptAgentName(issueId, receipt);
   const retry = useRetryTaskSupplement(issueId);
+  const requeue = useRequeueTaskSupplement(issueId);
   const resend = useCreateComment(issueId);
   const [resent, setResent] = useState(false);
   const terminal = !!task && TERMINAL.has(task.status);
@@ -156,6 +157,16 @@ function SteerReceipt({ issueId, entry, receipt }: {
           ? t(($) => $.inline_run.supplement_failure_timeout)
           : t(($) => $.inline_run.supplement_failure_unknown);
   const canRetry = !terminal && reasonCode !== "turn_ended";
+  // #42 的出口只给「从未投递」这一类。attempt_count 是唯一判据：0 表示这条从没被
+  // 送到那一轮，agent 根本没见过这段文字，重放不存在重复；>0 表示投递尝试已经发生，
+  // 文字可能已经进了上下文而 ack 只是迟到，重放有可能让它被读两遍。
+  //
+  // 严格等于 0 而不是 <= 0 或 falsy：旧服务端不发这个字段，undefined 是「不知道」
+  // 而不是「从未投递」。按 0 处理会在老服务端上显示一个点了也不生效的按钮。
+  //
+  // 这个按钮恰好覆盖 canRetry 覆盖不到的那一半——那一轮已经结束了（turn_ended），
+  // 重试无对象可重试，只能排到下一轮。
+  const canRequeue = receipt.status === "failed" && receipt.attempt_count === 0;
   return (
     <div role="alert" className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-destructive">
       <span className="inline-flex items-center gap-1.5">
@@ -169,6 +180,16 @@ function SteerReceipt({ issueId, entry, receipt }: {
           })}>
           {retry.isPending ? <Loader2 className="size-3 motion-safe:animate-spin" /> : <RotateCcw className="size-3" />}
           {t(($) => $.inline_run.supplement_retry)}
+        </Button>
+      )}
+      {canRequeue && (
+        <Button type="button" size="xs" variant="outline" className="text-foreground" disabled={requeue.isPending}
+          onClick={() => requeue.mutate({ taskId: receipt.task_id, commentId: entry.id }, {
+            onSuccess: () => toast.success(t(($) => $.inline_run.supplement_requeue_done)),
+            onError: () => toast.error(t(($) => $.inline_run.supplement_requeue_failed)),
+          })}>
+          {requeue.isPending ? <Loader2 className="size-3 motion-safe:animate-spin" /> : <Forward className="size-3" />}
+          {t(($) => $.inline_run.supplement_requeue)}
         </Button>
       )}
       {!resent && (

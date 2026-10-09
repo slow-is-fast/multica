@@ -33,7 +33,10 @@
     "steer_resend": "作为新一轮发送",
     "steer_resend_failed": "没能作为新一轮发送。",
     "steer_step": "{{name}} 插话",
-    "steer_step_read": "已读取"
+    "steer_step_read": "已读取",
+    "supplement_requeue": "改为排到下一轮",
+    "supplement_requeue_failed": "无法改为排到下一轮。",
+    "supplement_requeue_done": "已改为排到下一轮。"
   },
   "working_filter_error": {
     "title": "无法加载智能体正在处理的任务"

@@ -34,7 +34,10 @@
     "steer_resend": "Envoyer comme nouvelle exécution",
     "steer_resend_failed": "Impossible de l'envoyer comme nouvelle exécution.",
     "steer_step": "{{name}} a ajouté",
-    "steer_step_read": "Lu"
+    "steer_step_read": "Lu",
+    "supplement_requeue": "Reporter à la prochaine exécution",
+    "supplement_requeue_failed": "Impossible de la reporter à la prochaine exécution.",
+    "supplement_requeue_done": "Reporté à la prochaine exécution."
   },
   "working_filter_error": {
     "title": "Impossible de charger les tâches en cours de traitement par les agents"

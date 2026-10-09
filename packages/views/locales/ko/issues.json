@@ -33,7 +33,10 @@
     "steer_resend": "새 실행으로 보내기",
     "steer_resend_failed": "새 실행으로 보내지 못했습니다.",
     "steer_step": "{{name}}이(가) 추가",
-    "steer_step_read": "읽음"
+    "steer_step_read": "읽음",
+    "supplement_requeue": "다음 실행으로 넘기기",
+    "supplement_requeue_failed": "다음 실행으로 넘기지 못했습니다.",
+    "supplement_requeue_done": "다음 실행으로 넘겼습니다."
   },
   "working_filter_error": {
     "title": "에이전트가 작업 중인 태스크를 불러오지 못했습니다"

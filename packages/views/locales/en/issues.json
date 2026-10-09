@@ -34,7 +34,10 @@
     "steer_resend": "Send as a new run",
     "steer_resend_failed": "Couldn't send it as a new run.",
     "steer_step": "{{name}} added",
-    "steer_step_read": "Read"
+    "steer_step_read": "Read",
+    "supplement_requeue": "Move to the next run",
+    "supplement_requeue_failed": "Couldn't move it to the next run.",
+    "supplement_requeue_done": "Moved to the next run."
   },
   "working_filter_error": {
     "title": "Couldn't load issues with working agents"
