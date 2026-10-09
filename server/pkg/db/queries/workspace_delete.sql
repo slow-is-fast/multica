@@ -724,10 +724,3 @@ deleted_share_links AS (
 )
 DELETE FROM workspace_invitation
 WHERE workspace_invitation.workspace_id = $1;
-
--- Ruel: Run 产物按 workspace 归属（迁移 564 建的 ruel_artifacts 带
--- workspace_id NOT NULL），workspace 拆除时必须一起清掉，否则会留下没有
--- 归属工作区的孤儿证据行。产物以 task 为主键维度，所以排在任务删除之前。
--- name: DeleteWorkspaceRuelArtifacts :exec
-DELETE FROM ruel_artifacts
-WHERE ruel_artifacts.workspace_id = $1;

@@ -602,6 +602,8 @@ const deleteWorkspaceRuelArtifacts = `-- name: DeleteWorkspaceRuelArtifacts :exe
 DELETE FROM ruel_artifacts WHERE ruel_artifacts.workspace_id = $1
 `
 
+// Ruel: Run 产物按 task 组织，因此排在任务删除之前——先删任务会把产
+// 物留成没有归属 Run 的孤儿行。
 func (q *Queries) DeleteWorkspaceRuelArtifacts(ctx context.Context, workspaceID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteWorkspaceRuelArtifacts, workspaceID)
 	return err

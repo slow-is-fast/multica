@@ -769,51 +769,6 @@ func (q *Queries) ListIssueTaskUsage(ctx context.Context, issueID pgtype.UUID) (
 	return items, nil
 }
 
-const upsertTaskUsage = `-- name: UpsertTaskUsage :exec
-INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
-ON CONFLICT (task_id, provider, model)
-DO UPDATE SET
-    input_tokens = EXCLUDED.input_tokens,
-    output_tokens = EXCLUDED.output_tokens,
-    cache_read_tokens = EXCLUDED.cache_read_tokens,
-    cache_write_tokens = EXCLUDED.cache_write_tokens,
-    cost_usd_ticks = EXCLUDED.cost_usd_ticks,
-    updated_at = now()
-`
-
-type UpsertTaskUsageParams struct {
-	TaskID           pgtype.UUID `json:"task_id"`
-	Provider         string      `json:"provider"`
-	Model            string      `json:"model"`
-	InputTokens      int64       `json:"input_tokens"`
-	OutputTokens     int64       `json:"output_tokens"`
-	CacheReadTokens  int64       `json:"cache_read_tokens"`
-	CacheWriteTokens int64       `json:"cache_write_tokens"`
-	CostUsdTicks     pgtype.Int8 `json:"cost_usd_ticks"`
-}
-
-// Bumps `updated_at` on INSERT and on conflict so the hourly-rollup worker
-// detects the row as dirty and re-aggregates its bucket.
-// Without the conflict-side bump, a correction to historical token counts
-// would never propagate to the rollup.
-// cost_usd_ticks is the provider's own price for this usage (1e-10 USD), NULL
-// when it reports none. It is overwritten like the token counters so a
-// corrected report replaces the previous figure rather than accumulating.
-func (q *Queries) UpsertTaskUsage(ctx context.Context, arg UpsertTaskUsageParams) error {
-	_, err := q.db.Exec(ctx, upsertTaskUsage,
-		arg.TaskID,
-		arg.Provider,
-		arg.Model,
-		arg.InputTokens,
-		arg.OutputTokens,
-		arg.CacheReadTokens,
-		arg.CacheWriteTokens,
-		arg.CostUsdTicks,
-	)
-	return err
-}
-
 const ruelListAgentTaskUsageInWindow = `-- name: RuelListAgentTaskUsageInWindow :many
 SELECT u.id, u.task_id, u.provider, u.model, u.input_tokens, u.output_tokens, u.cache_read_tokens, u.cache_write_tokens, u.created_at, u.updated_at, u.cost_usd_ticks
 FROM task_usage u
@@ -830,6 +785,17 @@ type RuelListAgentTaskUsageInWindowParams struct {
 	Until   pgtype.Timestamptz `json:"until"`
 }
 
+// Ruel #41: every usage row for one agent's runs inside the window [since, until).
+//
+// task_usage carries no agent dimension, so the scope comes from the run: the
+// row's task joined to its agent. Cost is priced per model on the server side,
+// so this returns raw rows, never pre-aggregated sums.
+//
+// @since and @until are already UTC instants computed by the caller. Both
+// bounds are enforced here, and the upper one is exclusive, so a row lands in
+// exactly one window: a closed upper bound would count the boundary instant
+// twice (in this window and the next), and no upper bound would let a later
+// window's rows leak backwards into an earlier one.
 func (q *Queries) RuelListAgentTaskUsageInWindow(ctx context.Context, arg RuelListAgentTaskUsageInWindowParams) ([]TaskUsage, error) {
 	rows, err := q.db.Query(ctx, ruelListAgentTaskUsageInWindow, arg.AgentID, arg.Since, arg.Until)
 	if err != nil {
@@ -879,6 +845,13 @@ type RuelListWorkspaceTaskUsageInWindowParams struct {
 	Until       pgtype.Timestamptz `json:"until"`
 }
 
+// Ruel #41: the same window scoped to a workspace.
+//
+// agent_task_queue has no workspace column, so the scope walks task -> issue ->
+// workspace. **A run without an issue is invisible here**: its usage never
+// enters a workspace total. That is a real gap, not an oversight — the caller
+// cannot count what the query cannot see, so it is stated in the budget's
+// documentation rather than silently absorbed.
 func (q *Queries) RuelListWorkspaceTaskUsageInWindow(ctx context.Context, arg RuelListWorkspaceTaskUsageInWindowParams) ([]TaskUsage, error) {
 	rows, err := q.db.Query(ctx, ruelListWorkspaceTaskUsageInWindow, arg.WorkspaceID, arg.Since, arg.Until)
 	if err != nil {
@@ -909,4 +882,49 @@ func (q *Queries) RuelListWorkspaceTaskUsageInWindow(ctx context.Context, arg Ru
 		return nil, err
 	}
 	return items, nil
+}
+
+const upsertTaskUsage = `-- name: UpsertTaskUsage :exec
+INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+ON CONFLICT (task_id, provider, model)
+DO UPDATE SET
+    input_tokens = EXCLUDED.input_tokens,
+    output_tokens = EXCLUDED.output_tokens,
+    cache_read_tokens = EXCLUDED.cache_read_tokens,
+    cache_write_tokens = EXCLUDED.cache_write_tokens,
+    cost_usd_ticks = EXCLUDED.cost_usd_ticks,
+    updated_at = now()
+`
+
+type UpsertTaskUsageParams struct {
+	TaskID           pgtype.UUID `json:"task_id"`
+	Provider         string      `json:"provider"`
+	Model            string      `json:"model"`
+	InputTokens      int64       `json:"input_tokens"`
+	OutputTokens     int64       `json:"output_tokens"`
+	CacheReadTokens  int64       `json:"cache_read_tokens"`
+	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	CostUsdTicks     pgtype.Int8 `json:"cost_usd_ticks"`
+}
+
+// Bumps `updated_at` on INSERT and on conflict so the hourly-rollup worker
+// detects the row as dirty and re-aggregates its bucket.
+// Without the conflict-side bump, a correction to historical token counts
+// would never propagate to the rollup.
+// cost_usd_ticks is the provider's own price for this usage (1e-10 USD), NULL
+// when it reports none. It is overwritten like the token counters so a
+// corrected report replaces the previous figure rather than accumulating.
+func (q *Queries) UpsertTaskUsage(ctx context.Context, arg UpsertTaskUsageParams) error {
+	_, err := q.db.Exec(ctx, upsertTaskUsage,
+		arg.TaskID,
+		arg.Provider,
+		arg.Model,
+		arg.InputTokens,
+		arg.OutputTokens,
+		arg.CacheReadTokens,
+		arg.CacheWriteTokens,
+		arg.CostUsdTicks,
+	)
+	return err
 }

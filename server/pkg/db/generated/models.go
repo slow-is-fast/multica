@@ -1345,6 +1345,36 @@ type QuickAction struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
+type RuelArtifact struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	TaskID      pgtype.UUID        `json:"task_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	Kind        string             `json:"kind"`
+	Uri         string             `json:"uri"`
+	Size        int64              `json:"size"`
+	Checksum    string             `json:"checksum"`
+	Content     pgtype.Text        `json:"content"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type RuelProjectKnowledge struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Statement       string             `json:"statement"`
+	Rationale       string             `json:"rationale"`
+	SourceTaskID    pgtype.UUID        `json:"source_task_id"`
+	SourceIssueID   pgtype.UUID        `json:"source_issue_id"`
+	SourceCommentID pgtype.UUID        `json:"source_comment_id"`
+	Status          string             `json:"status"`
+	ReviewNote      string             `json:"review_note"`
+	ReviewedByType  pgtype.Text        `json:"reviewed_by_type"`
+	ReviewedByID    pgtype.UUID        `json:"reviewed_by_id"`
+	ReviewedAt      pgtype.Timestamptz `json:"reviewed_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type RuntimeProfile struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`

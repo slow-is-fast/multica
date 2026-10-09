@@ -699,6 +699,52 @@ func (q *Queries) RetryTaskSupplement(ctx context.Context, arg RetryTaskSuppleme
 	return i, err
 }
 
+const ruelRequeueTaskSupplement = `-- name: RuelRequeueTaskSupplement :one
+DELETE FROM task_supplement
+WHERE comment_id = $1
+  AND task_id = $2
+  AND workspace_id = $3
+  AND status = 'failed'
+  AND failure_reason = 'turn_ended'
+  AND attempt_count = 0
+RETURNING task_id, workspace_id, issue_id, comment_id, author_id, client_request_id, status, failure_reason, attempt_count, created_at, updated_at, delivered_at
+`
+
+type RuelRequeueTaskSupplementParams struct {
+	CommentID   pgtype.UUID `json:"comment_id"`
+	TaskID      pgtype.UUID `json:"task_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Ruel #42: release ONE binding so the completion-reconcile query can see the
+// comment again. Scoped to comment_id AND task_id because one comment can steer
+// several runs; releasing every binding would silently re-open the others.
+//
+// attempt_count = 0 is the whole point: the supplement was never claimed, so
+// the agent never saw this text and replaying it cannot duplicate anything.
+// A claimed-but-unacknowledged row (attempt_count > 0) may already be in the
+// turn's context — its ack may simply be late — so it is excluded here. That
+// case has different semantics and is deliberately out of scope for #42.
+func (q *Queries) RuelRequeueTaskSupplement(ctx context.Context, arg RuelRequeueTaskSupplementParams) (TaskSupplement, error) {
+	row := q.db.QueryRow(ctx, ruelRequeueTaskSupplement, arg.CommentID, arg.TaskID, arg.WorkspaceID)
+	var i TaskSupplement
+	err := row.Scan(
+		&i.TaskID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.CommentID,
+		&i.AuthorID,
+		&i.ClientRequestID,
+		&i.Status,
+		&i.FailureReason,
+		&i.AttemptCount,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeliveredAt,
+	)
+	return i, err
+}
+
 const settleTerminalTaskSupplements = `-- name: SettleTerminalTaskSupplements :execrows
 UPDATE task_supplement AS supplement
 SET status = 'failed',
@@ -825,43 +871,6 @@ func (q *Queries) StartAgentTaskWithSupplement(ctx context.Context, arg StartAge
 		&i.CancelledByID,
 		&i.CancelledByName,
 		&i.IssueSnapshot,
-	)
-	return i, err
-}
-
-const ruelRequeueTaskSupplement = `-- name: RuelRequeueTaskSupplement :one
-DELETE FROM task_supplement
-WHERE comment_id = $1
-  AND task_id = $2
-  AND workspace_id = $3
-  AND status = 'failed'
-  AND failure_reason = 'turn_ended'
-  AND attempt_count = 0
-RETURNING task_id, workspace_id, issue_id, comment_id, author_id, client_request_id, status, failure_reason, attempt_count, created_at, updated_at, delivered_at
-`
-
-type RuelRequeueTaskSupplementParams struct {
-	CommentID   pgtype.UUID `json:"comment_id"`
-	TaskID      pgtype.UUID `json:"task_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-}
-
-func (q *Queries) RuelRequeueTaskSupplement(ctx context.Context, arg RuelRequeueTaskSupplementParams) (TaskSupplement, error) {
-	row := q.db.QueryRow(ctx, ruelRequeueTaskSupplement, arg.CommentID, arg.TaskID, arg.WorkspaceID)
-	var i TaskSupplement
-	err := row.Scan(
-		&i.TaskID,
-		&i.WorkspaceID,
-		&i.IssueID,
-		&i.CommentID,
-		&i.AuthorID,
-		&i.ClientRequestID,
-		&i.Status,
-		&i.FailureReason,
-		&i.AttemptCount,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DeliveredAt,
 	)
 	return i, err
 }

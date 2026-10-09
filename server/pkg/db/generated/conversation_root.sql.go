@@ -31,6 +31,15 @@ type ListConversationRootOwnersRow struct {
 
 // Preserve the newest non-null squad per agent, including terminal tasks.
 // Routing does not need execution context, results, or other issue threads.
+//
+// Thread ownership is keyed on comment_thread_id (migration 451 derives it
+// from the trigger comment and it never changes afterwards), NOT on
+// trigger_comment_id: MergeCommentIntoPendingTask deliberately re-stamps
+// trigger_comment_id to the newest folded comment (MUL-4302), so a thread's
+// first merged reply silently erased its own owner and every later reply in
+// that thread routed to nothing — no receipt, no run. trigger_comment_id is
+// still accepted so pre-451 rows that predate the derived column keep their
+// owner. Callers always pass the thread ROOT, for which the two are equal.
 func (q *Queries) ListConversationRootOwners(ctx context.Context, arg ListConversationRootOwnersParams) ([]ListConversationRootOwnersRow, error) {
 	rows, err := q.db.Query(ctx, listConversationRootOwners, arg.IssueID, arg.CommentThreadID)
 	if err != nil {
