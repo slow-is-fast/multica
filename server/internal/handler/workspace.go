@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/ruel/knowledge"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -1222,6 +1223,22 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			// evidence behind as orphans with no owning run.
 			name: "delete run artifacts",
 			run:  func() error { return qtx.DeleteWorkspaceRuelArtifacts(ctx, requester.WorkspaceID) },
+		},
+		{
+			// Ruel 项目知识条目按 workspace 归属（迁移 565 建的
+			// ruel_project_knowledge 带 workspace_id NOT NULL 且外键 CASCADE），
+			// workspace 拆除时必须一起清掉。
+			//
+			// 走的是 knowledge 包的手写查询而不是 sqlc：fork 侧新增的读写一律
+			// 手写，把改动圈在 ruel/ 包内，同步上游时不必碰 pkg/db/generated。
+			// 因此这里传 tx 本身（qtx 上不暴露原始 Exec），与上面那条
+			// DeleteWorkspaceRuelArtifacts 的写法不同——那一条是 sqlc 生成物。
+			// 新加入者请照这一条的写法。
+			name: "delete ruel project knowledge",
+			run: func() error {
+				_, err := knowledge.NewStore(tx).DeleteByWorkspace(ctx, requester.WorkspaceID)
+				return err
+			},
 		},
 		{
 			// Bounded batches, after the rollup lock because it deletes
