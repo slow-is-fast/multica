@@ -58,6 +58,35 @@ func TestClosedRowsResolveThroughTheirAliasRules(t *testing.T) {
 		{"openai:o4-mini", []string{"o4-mini", "openai/o4-mini", "o4-mini-2025-04-16"}},
 		{"openai:gpt-4o", []string{"gpt-4o", "openai/gpt-4o", "gpt-4o-latest", "gpt-4o-2024-11-20"}},
 		{"openai:gpt-4o-mini", []string{"gpt-4o-mini", "openai/gpt-4o-mini", "gpt-4o-mini-2024-07-18"}},
+		// -- ruel#44 batch: Zhipu GLM, the rest of the family --
+		{"zhipu:glm-5", []string{"glm-5", "zhipu/glm-5", "glm-5-latest", "glm-5-20260101", "glm-5[1m]"}},
+		{"zhipu:glm-5.1", []string{"glm-5.1", "glm-5-1", "zhipu/glm-5.1", "glm-5.1-latest"}},
+		{"zhipu:glm-5-turbo", []string{"glm-5-turbo", "zhipu/glm-5-turbo", "glm-5-turbo-20260101"}},
+		{"zhipu:glm-4.7", []string{"glm-4.7", "glm-4-7", "zhipu/glm-4.7", "glm-4.7[1m]"}},
+		{"zhipu:glm-4.7-flashx", []string{"glm-4.7-flashx", "glm-4-7-flashx", "zhipu/glm-4.7-flashx"}},
+		{"zhipu:glm-4.7-flash", []string{"glm-4.7-flash", "glm-4-7-flash", "zhipu/glm-4.7-flash"}},
+		{"zhipu:glm-4.6", []string{"glm-4.6", "glm-4-6", "zhipu/glm-4.6", "glm-4.6-latest"}},
+		{"zhipu:glm-4.5", []string{"glm-4.5", "glm-4-5", "zhipu/glm-4.5", "glm-4.5-20260101"}},
+		{"zhipu:glm-4.5-x", []string{"glm-4.5-x", "glm-4-5-x", "zhipu/glm-4.5-x"}},
+		{"zhipu:glm-4.5-air", []string{"glm-4.5-air", "glm-4-5-air", "zhipu/glm-4.5-air"}},
+		{"zhipu:glm-4.5-airx", []string{"glm-4.5-airx", "glm-4-5-airx", "zhipu/glm-4.5-airx"}},
+		{"zhipu:glm-4.5-flash", []string{"glm-4.5-flash", "glm-4-5-flash", "zhipu/glm-4.5-flash"}},
+		// -- ruel#44 batch: Moonshot K2.6 --
+		{"moonshotai:kimi-k2.6", []string{"kimi-k2.6", "kimi-k2-6", "moonshotai/kimi-k2.6", "kimi-k2.6[1m]"}},
+		// -- ruel#44 batch: Cursor. Every id is probed QUALIFIED, because
+		// qualifying is the whole point: these names are generic across
+		// providers and the bare form must NOT resolve (see
+		// TestGenericIdsStayUnpricedWithoutAProvider). --
+		{"cursor:auto", []string{"cursor/auto", "cursor/auto-latest", "cursor/auto[1m]"}},
+		{"cursor:composer-2.5-fast", []string{"cursor/composer-2.5-fast", "cursor/composer-2-5-fast"}},
+		{"cursor:composer-2.5", []string{"cursor/composer-2.5", "cursor/composer-2-5"}},
+		{"cursor:composer-2-fast", []string{"cursor/composer-2-fast"}},
+		{"cursor:composer-2", []string{"cursor/composer-2", "cursor/composer-2-20260101"}},
+		{"cursor:composer-1.5", []string{"cursor/composer-1.5", "cursor/composer-1-5"}},
+		{"cursor:composer-1", []string{"cursor/composer-1", "cursor/composer-1-latest"}},
+		// The legacy fallback bucket: the daemon emits the provider name
+		// itself when it has no model to name.
+		{"cursor:cursor", []string{"cursor", "cursor/cursor"}},
 	}
 
 	for _, tc := range cases {
@@ -105,6 +134,20 @@ func TestUnknownNeighboursStayUnmapped(t *testing.T) {
 		"gpt-5-turbo", "gpt-5-pro", "gpt-5-mini-plus",
 		"o3-pro", "o3-mini-high", "o4-mini-high",
 		"gpt-4o-plus", "gpt-4o-mini-plus",
+		// Zhipu: an unknown minor or qualifier must not inherit its
+		// neighbour's rate. `glm-4.5-air-free` is the sharpest one — as a
+		// prefix it would otherwise land on `glm-4.5-air` ($0.20 / $1.10)
+		// or `glm-4.5` ($0.60 / $2.20).
+		"glm-5.2", "glm-5-preview", "glm-5-1-1",
+		"glm-4.8", "glm-4.9", "glm-4-5-air-free", "glm-4.5-air-pro",
+		"glm-4.6-pro", "glm-4.7-flash-pro", "glm-4.5-flashx",
+		// Moonshot: K2.6 is the only K2 variant on the official price
+		// sheet, so the neighbours must stay unmapped.
+		"kimi-k2.5", "kimi-k2.7",
+		// Cursor: an unknown composer minor must not fall back to
+		// `composer-2` ($0.50 / $2.50) or to the legacy `cursor` bucket.
+		"cursor/composer-3", "cursor/composer-2.6", "cursor/composer-1.6",
+		"cursor/composer-2.5-pro",
 	} {
 		if p, ok := PriceForModelAlias(id); ok {
 			t.Errorf("%q resolved to %s:%s — it is not a SKU either table carries, so it must stay unmapped instead of inheriting a neighbour's rate",
@@ -141,6 +184,21 @@ func TestOrderTrapsResolveToTheirOwnTier(t *testing.T) {
 		{"claude-sonnet-4-5", "anthropic:claude-sonnet-4.5", "anthropic:claude-sonnet-4", "same rate today, but a different SKU that must not share a row"},
 		// The pair the constant was written for.
 		{"claude-fable-5-1", "anthropic:claude-fable-5-1", "anthropic:claude-fable-5", "fable-5 cache reads are 4x fable-5.1's"},
+		// Zhipu: the base minor is a PREFIX of three dearer siblings and one
+		// free one, so a bare-substring rule would misprice all four.
+		{"glm-4.5-x", "zhipu:glm-4.5-x", "zhipu:glm-4.5", "glm-4.5-x is 3.7x glm-4.5"},
+		{"glm-4.5-airx", "zhipu:glm-4.5-airx", "zhipu:glm-4.5-air", "airx is 5x air"},
+		{"glm-4.5-air", "zhipu:glm-4.5-air", "zhipu:glm-4.5", "air is 3x cheaper than glm-4.5"},
+		{"glm-4.5-flash", "zhipu:glm-4.5-flash", "zhipu:glm-4.5", "flash is free; glm-4.5 is not"},
+		{"glm-4.7-flash", "zhipu:glm-4.7-flash", "zhipu:glm-4.7", "flash is free; glm-4.7 is not"},
+		{"glm-4.7-flashx", "zhipu:glm-4.7-flashx", "zhipu:glm-4.7-flash", "flashx bills; flash does not"},
+		{"glm-5.1", "zhipu:glm-5.1", "zhipu:glm-5", "glm-5.1 is 1.4x glm-5 on input"},
+		{"glm-5-turbo", "zhipu:glm-5-turbo", "zhipu:glm-5", "turbo is a distinct SKU, not a glm-5 variant"},
+		// Cursor: the base minor is a prefix of both a 6x and a 3x sibling.
+		{"cursor/composer-2.5", "cursor:composer-2.5", "cursor:composer-2", "composer-2 is 1x, but a different SKU"},
+		{"cursor/composer-2.5-fast", "cursor:composer-2.5-fast", "cursor:composer-2.5", "2.5-fast is 6x composer-2.5"},
+		{"cursor/composer-2-fast", "cursor:composer-2-fast", "cursor:composer-2", "2-fast is 3x composer-2"},
+		{"cursor/composer-1.5", "cursor:composer-1.5", "cursor:composer-1", "1.5 is 2.8x composer-1"},
 	}
 
 	for _, tc := range pairs {
@@ -230,6 +288,109 @@ func TestLegacyOpenAIDashToleranceIsFrozen(t *testing.T) {
 		}
 		if _, ok := fe[id]; ok {
 			t.Errorf("%q: the dashboard now prices this dashed id too — the divergence is gone, so drop it from this frozen list", id)
+		}
+	}
+}
+
+// TestGenericIdsStayUnpricedWithoutAProvider is the guard for the new
+// provider parameter on EstimateUsageCost, and it is the one test in this file
+// that is about a MISPRICE rather than a coverage gap.
+//
+// Cursor and codex both report the literal model id `auto` — that is not a
+// guess, it is called out in ModelPlaceholderValues in model_completeness.go.
+// Cursor's `auto` is $1.25 / $6; codex's is whatever codex routes to, which
+// this table does not know. A rule that resolved the BARE id would therefore
+// bill every codex `auto` run at Cursor's rate, and the coverage guard would
+// not notice: the id resolves, the rates are internally consistent, and the
+// only symptom is a wrong number on someone else's invoice.
+//
+// So the property pinned here is directional: the same id must price under its
+// own provider and stay unpriced under any other.
+func TestGenericIdsStayUnpricedWithoutAProvider(t *testing.T) {
+	qualified := []struct {
+		model    string
+		provider string
+		wantKey  string
+	}{
+		{"auto", "cursor", "cursor:auto"},
+		{"composer-1", "cursor", "cursor:composer-1"},
+		{"composer-2.5", "cursor", "cursor:composer-2.5"},
+	}
+	for _, tc := range qualified {
+		got, ok := PriceForModel(tc.model, tc.provider)
+		if !ok {
+			t.Errorf("PriceForModel(%q, %q): unresolved, want %s", tc.model, tc.provider, tc.wantKey)
+			continue
+		}
+		if key := got.Provider + ":" + got.Model; key != tc.wantKey {
+			t.Errorf("PriceForModel(%q, %q) = %s, want %s", tc.model, tc.provider, key, tc.wantKey)
+		}
+	}
+
+	// The same ids under a provider that does not own them, plus bare.
+	for _, tc := range []struct {
+		model    string
+		provider string
+	}{
+		{"auto", "codex"},
+		{"auto", "openai"},
+		{"auto", ""},
+		{"composer-1", "openai"},
+		{"composer-2.5", "codex"},
+		{"composer-2.5", ""},
+	} {
+		if got, ok := PriceForModel(tc.model, tc.provider); ok {
+			t.Errorf("PriceForModel(%q, %q) resolved to %s:%s — a generic id must stay unpriced outside the provider that owns it",
+				tc.model, tc.provider, got.Provider, got.Model)
+		}
+	}
+
+	// And the consequence that actually matters, stated as a cost: a codex
+	// `auto` run must come back unpriced rather than picking up Cursor's rate.
+	// Unpriced is the safe failure — it is counted and surfaced, and it does
+	// not silently feed a wrong number into a budget gate.
+	got := EstimateUsageCost("auto", "codex", 0, 100_000, 5_000, 200_000, 0)
+	if got.Source != CostSourceUnpriced {
+		t.Errorf("codex `auto`: source = %q, want %q", got.Source, CostSourceUnpriced)
+	}
+	if got.Priceable() {
+		t.Error("codex `auto` is Priceable(); it must stay out of medians and budgets")
+	}
+	cursor := EstimateUsageCost("auto", "cursor", 0, 100_000, 5_000, 200_000, 0)
+	if cursor.Source != CostSourceTable || cursor.USD <= 0 {
+		t.Errorf("cursor `auto`: source = %q USD = %v, want table and > 0", cursor.Source, cursor.USD)
+	}
+}
+
+// TestFreeTiersResolveToZeroNotUnpriced pins the reason the two all-zero glm
+// flash rows are in the table at all. It would be "simpler" to leave an id out
+// when its rates are all 0 — and it would be wrong. Under the four-state cost
+// model an unknown id is CostSourceUnpriced, which is excluded from medians and
+// from every budget gate; a known-free id is CostSourceZero, which is priced
+// and belongs in a median. Leaving a free tier out of the table is therefore
+// not neutral: it converts rows that genuinely cost nothing into rows that
+// disable the gate they flow into (ruel#24's failure mode, re-entering from the
+// other side).
+func TestFreeTiersResolveToZeroNotUnpriced(t *testing.T) {
+	const in, out, cacheRead = 43_068, 1_198, 240_128
+	for _, id := range []string{"glm-4.5-flash", "glm-4.7-flash"} {
+		price, ok := PriceForModelAlias(id)
+		if !ok {
+			t.Errorf("%q: unresolved — a free tier must be in the table, not absent from it", id)
+			continue
+		}
+		if price.InputPerM != 0 || price.OutputPerM != 0 || price.CacheReadPerM != 0 || price.CacheWritePerM != 0 {
+			t.Errorf("%q: rates are not all zero (%+v); this test is about the free tiers", id, price)
+		}
+		got := EstimateUsageCost(id, "", 0, in, out, cacheRead, 0)
+		if got.Source != CostSourceZero {
+			t.Errorf("%q: source = %q, want %q", id, got.Source, CostSourceZero)
+		}
+		if !got.Priceable() {
+			t.Errorf("%q: not Priceable() — a known-free row belongs in a median as a real 0", id)
+		}
+		if got.USD != 0 {
+			t.Errorf("%q: USD = %v, want 0", id, got.USD)
 		}
 	}
 }

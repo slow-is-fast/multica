@@ -141,6 +141,10 @@ var modelPrices = map[string]ModelPrice{
 	// providers/moonshotai/models/kimi-k3.toml). Moonshot bills no separate
 	// cache write, so CacheWritePerM mirrors Input.
 	"moonshotai:kimi-k3": {Provider: "moonshotai", Model: "kimi-k3", InputPerM: 3.0, CacheReadPerM: 0.30, CacheWritePerM: 3.0, OutputPerM: 15.0},
+	// Kimi K2.6 (kimi.com/resources/kimi-k2-6-pricing, the page the frontend
+	// cites). CacheWrite mirrors input for the same reason K3's does:
+	// Moonshot bills no separate cache-write rate.
+	"moonshotai:kimi-k2.6": {Provider: "moonshotai", Model: "kimi-k2.6", InputPerM: 0.95, CacheReadPerM: 0.16, CacheWritePerM: 0.95, OutputPerM: 4.00},
 	// Zhipu GLM-5 (docs.bigmodel.cn/cn/guide/start/pricing, accessed
 	// 2026-10-07). Rates are the published INTERNATIONAL USD list: $1.00
 	// input / $3.20 output / $0.20 cache hit per 1M tokens.
@@ -161,6 +165,55 @@ var modelPrices = map[string]ModelPrice{
 	// whole glm family all along; the Go table was simply missing it (see
 	// TestZhipuGLM5Priced).
 	"zhipu:glm-5": {Provider: "zhipu", Model: "glm-5", InputPerM: 1.00, CacheReadPerM: 0.20, CacheWritePerM: 1.00, OutputPerM: 3.20},
+	// The rest of the glm family (ruel#44): same publisher, same page, same
+	// two caveats as the glm-5 row above — the rates are the INTERNATIONAL
+	// USD list, and Zhipu publishes no separate cache-write rate so
+	// CacheWritePerM mirrors Input.
+	//
+	// The two flash rows are all-zero on purpose, not missing: Zhipu serves
+	// them free, and a 0 here is the difference between "known-free" and
+	// "unknown". Under the four-state cost model an all-zero row with real
+	// tokens resolves to CostSourceZero, which is priced and belongs in a
+	// median, whereas leaving the id out of the table would make it
+	// CostSourceUnpriced — the state that silently disables every budget
+	// gate it flows into. Same convention as alibaba:qwen3.8-max-preview.
+	"zhipu:glm-5.1":        {Provider: "zhipu", Model: "glm-5.1", InputPerM: 1.40, CacheReadPerM: 0.26, CacheWritePerM: 1.40, OutputPerM: 4.40},
+	"zhipu:glm-5-turbo":    {Provider: "zhipu", Model: "glm-5-turbo", InputPerM: 1.20, CacheReadPerM: 0.24, CacheWritePerM: 1.20, OutputPerM: 4.00},
+	"zhipu:glm-4.7":        {Provider: "zhipu", Model: "glm-4.7", InputPerM: 0.60, CacheReadPerM: 0.11, CacheWritePerM: 0.60, OutputPerM: 2.20},
+	"zhipu:glm-4.7-flashx": {Provider: "zhipu", Model: "glm-4.7-flashx", InputPerM: 0.07, CacheReadPerM: 0.01, CacheWritePerM: 0.07, OutputPerM: 0.40},
+	"zhipu:glm-4.7-flash":  {Provider: "zhipu", Model: "glm-4.7-flash", InputPerM: 0, CacheReadPerM: 0, CacheWritePerM: 0, OutputPerM: 0},
+	"zhipu:glm-4.6":        {Provider: "zhipu", Model: "glm-4.6", InputPerM: 0.60, CacheReadPerM: 0.11, CacheWritePerM: 0.60, OutputPerM: 2.20},
+	"zhipu:glm-4.5":        {Provider: "zhipu", Model: "glm-4.5", InputPerM: 0.60, CacheReadPerM: 0.11, CacheWritePerM: 0.60, OutputPerM: 2.20},
+	"zhipu:glm-4.5-x":      {Provider: "zhipu", Model: "glm-4.5-x", InputPerM: 2.20, CacheReadPerM: 0.45, CacheWritePerM: 2.20, OutputPerM: 8.90},
+	"zhipu:glm-4.5-air":    {Provider: "zhipu", Model: "glm-4.5-air", InputPerM: 0.20, CacheReadPerM: 0.03, CacheWritePerM: 0.20, OutputPerM: 1.10},
+	"zhipu:glm-4.5-airx":   {Provider: "zhipu", Model: "glm-4.5-airx", InputPerM: 1.10, CacheReadPerM: 0.22, CacheWritePerM: 1.10, OutputPerM: 4.50},
+	"zhipu:glm-4.5-flash":  {Provider: "zhipu", Model: "glm-4.5-flash", InputPerM: 0, CacheReadPerM: 0, CacheWritePerM: 0, OutputPerM: 0},
+	// Cursor Composer / Auto (cursor.com/docs/models-and-pricing,
+	// cursor.com/docs/models/cursor-composer-2,
+	// cursor.com/docs/models/cursor-composer-2-5). Cursor publishes no
+	// cache-write rate for any of these, and cacheWrite stays 0 for a reason:
+	// billing a reported cache_write_tokens off the input rate would invent
+	// spend that the vendor never charged.
+	//
+	// Every id here is generic (`auto`, `composer-*`), and `auto` collides
+	// head-on with codex — both providers report it (see
+	// ModelPlaceholderValues in model_completeness.go). That is why the
+	// frontend keys them `cursor/...` and why the rules below are pinned to
+	// the `cursor/` prefix rather than to the bare id: a rule that resolved
+	// bare `auto` would bill a codex run at Cursor's rate. Only the legacy
+	// `cursor` key is unqualified, and only because it equals the provider
+	// name itself and therefore cannot collide.
+	"cursor:auto":              {Provider: "cursor", Model: "auto", InputPerM: 1.25, CacheReadPerM: 0.25, CacheWritePerM: 0, OutputPerM: 6.00},
+	"cursor:composer-2.5-fast": {Provider: "cursor", Model: "composer-2.5-fast", InputPerM: 3.00, CacheReadPerM: 0.50, CacheWritePerM: 0, OutputPerM: 15.00},
+	"cursor:composer-2.5":      {Provider: "cursor", Model: "composer-2.5", InputPerM: 0.50, CacheReadPerM: 0.20, CacheWritePerM: 0, OutputPerM: 2.50},
+	"cursor:composer-2-fast":   {Provider: "cursor", Model: "composer-2-fast", InputPerM: 1.50, CacheReadPerM: 0.35, CacheWritePerM: 0, OutputPerM: 7.50},
+	"cursor:composer-2":        {Provider: "cursor", Model: "composer-2", InputPerM: 0.50, CacheReadPerM: 0.20, CacheWritePerM: 0, OutputPerM: 2.50},
+	"cursor:composer-1.5":      {Provider: "cursor", Model: "composer-1.5", InputPerM: 3.50, CacheReadPerM: 0.35, CacheWritePerM: 0, OutputPerM: 17.50},
+	"cursor:composer-1":        {Provider: "cursor", Model: "composer-1", InputPerM: 1.25, CacheReadPerM: 0.125, CacheWritePerM: 0, OutputPerM: 10.00},
+	// Legacy fallback: when neither the result event nor the configured
+	// runtime model names a model, the daemon emits the literal `cursor`.
+	// Priced at the current Composer 2.5 Fast default.
+	"cursor:cursor": {Provider: "cursor", Model: "cursor", InputPerM: 3.00, CacheReadPerM: 0.50, CacheWritePerM: 0, OutputPerM: 15.00},
 	// Volcengine Ark (ark.cn-beijing.volces.com). `ark-code-latest` is a
 	// rolling alias whose target can be switched in the Volcengine console
 	// (across model families), so it is not a stable model identity; the
@@ -310,10 +363,47 @@ var modelAliasRules = []struct {
 	// unmapped; `kimi-code/k3` (Kimi Code CLI) resolves via the `/k3$` form.
 	{regexp.MustCompile(`(^|/|:)kimi-k3$`), "moonshotai:kimi-k3"},
 	{regexp.MustCompile(`(^|/|:)k3$`), "moonshotai:kimi-k3"},
-	// Zhipu GLM-5. Anchored so the neighbouring SKUs the frontend also carries
-	// (`glm-5.1`, `glm-5-turbo`) stay unmapped until they get rows of their
-	// own — same "every catalog SKU needs its own row" rule.
-	{regexp.MustCompile(`(^|/|:)glm-5$`), "zhipu:glm-5"},
+	// Kimi K2.6 (ruel#44). Placed after the K3 pair so `kimi-k3` keeps its own
+	// row, and ending at versionEnd so `kimi-k2.6-preview` stays unmapped.
+	{regexp.MustCompile(`(^|/|:)kimi-k2[-.]6` + versionEnd), "moonshotai:kimi-k2.6"},
+	// Zhipu GLM (ruel#44). Every rule ends at versionEnd and every family is
+	// ordered most-specific-first, for the same reason the OpenAI and Anthropic
+	// families are: as bare substrings `glm-4.5` would swallow `glm-4.5-air`,
+	// `-airx`, `-x` and `-flash`, whose rates differ by up to 4x
+	// (`glm-4.5` $0.60 / $2.20 against `glm-4.5-x` $2.20 / $8.90).
+	{regexp.MustCompile(`(^|/|:)glm-5[-.]1` + versionEnd), "zhipu:glm-5.1"},
+	{regexp.MustCompile(`(^|/|:)glm-5-turbo` + versionEnd), "zhipu:glm-5-turbo"},
+	{regexp.MustCompile(`(^|/|:)glm-5` + versionEnd), "zhipu:glm-5"},
+	{regexp.MustCompile(`(^|/|:)glm-4[-.]7-flashx` + versionEnd), "zhipu:glm-4.7-flashx"},
+	{regexp.MustCompile(`(^|/|:)glm-4[-.]7-flash` + versionEnd), "zhipu:glm-4.7-flash"},
+	{regexp.MustCompile(`(^|/|:)glm-4[-.]7` + versionEnd), "zhipu:glm-4.7"},
+	{regexp.MustCompile(`(^|/|:)glm-4[-.]6` + versionEnd), "zhipu:glm-4.6"},
+	{regexp.MustCompile(`(^|/|:)glm-4[-.]5-flash` + versionEnd), "zhipu:glm-4.5-flash"},
+	{regexp.MustCompile(`(^|/|:)glm-4[-.]5-x` + versionEnd), "zhipu:glm-4.5-x"},
+	{regexp.MustCompile(`(^|/|:)glm-4[-.]5-airx` + versionEnd), "zhipu:glm-4.5-airx"},
+	{regexp.MustCompile(`(^|/|:)glm-4[-.]5-air` + versionEnd), "zhipu:glm-4.5-air"},
+	{regexp.MustCompile(`(^|/|:)glm-4[-.]5` + versionEnd), "zhipu:glm-4.5"},
+	// Cursor (ruel#44). Every rule is pinned to the `cursor/` PREFIX rather
+	// than anchored on the bare id, and that is the whole design: `auto` and
+	// `composer-*` are generic across providers — codex reports `auto` too
+	// (see ModelPlaceholderValues in model_completeness.go) — so a rule that
+	// matched a bare `auto` would bill a codex run at Cursor's rate. Pinning
+	// the prefix mirrors `pricingCandidates` in utils.ts, which tries the
+	// provider-qualified key before the bare one, and it is what lets
+	// PriceForModel("auto", "cursor") resolve while
+	// PriceForModel("auto", "codex") stays unpriced.
+	//
+	// The composer rules are ordered most-specific-first for the usual reason:
+	// `composer-2` as a prefix of `composer-2.5` (6x) and `composer-2-fast`
+	// (3x) would otherwise bill both at $0.50 / $2.50.
+	{regexp.MustCompile(`(^|/)cursor/auto` + versionEnd), "cursor:auto"},
+	{regexp.MustCompile(`(^|/)cursor/composer-2[-.]5-fast` + versionEnd), "cursor:composer-2.5-fast"},
+	{regexp.MustCompile(`(^|/)cursor/composer-2[-.]5` + versionEnd), "cursor:composer-2.5"},
+	{regexp.MustCompile(`(^|/)cursor/composer-2-fast` + versionEnd), "cursor:composer-2-fast"},
+	{regexp.MustCompile(`(^|/)cursor/composer-2` + versionEnd), "cursor:composer-2"},
+	{regexp.MustCompile(`(^|/)cursor/composer-1[-.]5` + versionEnd), "cursor:composer-1.5"},
+	{regexp.MustCompile(`(^|/)cursor/composer-1` + versionEnd), "cursor:composer-1"},
+	{regexp.MustCompile(`(^|/|:)cursor` + versionEnd), "cursor:cursor"},
 	// Volcengine Ark `ark-code-latest` is deliberately absent: it is a
 	// console-switchable rolling alias across model families, not a stable
 	// model identity, so it stays unmapped.

@@ -103,6 +103,14 @@ func parseFrontendPricing(t *testing.T, path string) map[string]frontendPrice {
 // Without these candidates the guard would silently compare nothing for those
 // SKUs — a sync check that compares nothing is worse than no check, because it
 // looks like it is working.
+//
+// The slash-qualified pair was added in ruel#44 and is not decoration: the
+// frontend keys an id whose bare name is generic ACROSS PROVIDERS as
+// `<provider>/<model>` (`cursor/auto`, `kimi/k3`) precisely so it cannot
+// collide — see `resolvePricing` in packages/views/runtimes/utils.ts. A row
+// like cursor:auto therefore has no bare frontend key at all, and without this
+// candidate the guard would report it as server-only while the dashboard is in
+// fact pricing it.
 func frontendKeyCandidates(p ModelPrice) []string {
 	dashed := strings.ReplaceAll(p.Model, ".", "-")
 	return []string{
@@ -110,6 +118,8 @@ func frontendKeyCandidates(p ModelPrice) []string {
 		dashed,
 		p.Provider + "-" + p.Model,
 		p.Provider + "-" + dashed,
+		p.Provider + "/" + p.Model,
+		p.Provider + "/" + dashed,
 	}
 }
 
@@ -265,16 +275,17 @@ func TestFrontendPricingCoverageGapIsOnlyTheKnownSet(t *testing.T) {
 // the server already covered dropped out when the guard started measuring
 // resolvability). Shrinking either list is a win and just needs the constant
 // updated; growing it is exactly what this test exists to stop.
-var knownFrontendOnly = []string{
-	"cursor", "cursor/auto", "cursor/composer-1", "cursor/composer-1.5",
-	"cursor/composer-2", "cursor/composer-2-fast", "cursor/composer-2.5",
-	"cursor/composer-2.5-fast",
-	"glm-4.5", "glm-4.5-air", "glm-4.5-airx", "glm-4.5-flash", "glm-4.5-x",
-	"glm-4.6", "glm-4.7", "glm-4.7-flash", "glm-4.7-flashx",
-	"glm-5-turbo", "glm-5.1",
-	"kimi-k2.6",
-}
+// Empty as of the GLM / Cursor / K2.6 batch of ruel#44 (was 20). Every
+// frontend row the dashboard prices is now reachable on the server at the same
+// rates, which is the acceptance criterion the Issue set out. The list stays
+// rather than being deleted: the reverse direction is still open (see
+// knownServerOnly), and a future frontend row with no server counterpart turns
+// this red instead of silently widening the gap.
+var knownFrontendOnly = []string{}
 
+// Still 7 as of the server-side batch of ruel#44: the four Gemini rows, the
+// two MiniMax rows and gpt-5.2-codex. Closed in the next commit, which ports
+// them to packages/views/runtimes/utils.ts.
 var knownServerOnly = []string{
 	"google:gemini-2.5-flash", "google:gemini-2.5-pro",
 	"google:gemini-3-flash", "google:gemini-3.1-pro",
