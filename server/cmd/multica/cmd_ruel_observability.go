@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/spf13/cobra"
 )
 
@@ -212,8 +213,18 @@ type gateRefusalsReport struct {
 	Source      string             `json:"source,omitempty"`
 	GeneratedAt time.Time          `json:"generated_at"`
 	Process     string             `json:"process"`
-	Notices     []gateRefusalEntry `json:"notices"`
-	Push        gateRefusalsPush   `json:"push"`
+	Notices       []gateRefusalEntry        `json:"notices"`
+	Push          gateRefusalsPush          `json:"push"`
+	// #40：per_run 成本上限。只有 API 进程那份带它——这道闸门跑在用量上报的收口上，
+	// 而用量上报是 API 端点；daemon 侧从来没有这一层。
+	PerRunBudget *gateRefusalsPerRunBudget `json:"per_run_budget,omitempty"`
+}
+
+// gateRefusalsPerRunBudget 与 service.RuelRunCostBudgetStatus 的 JSON 形状对齐。
+type gateRefusalsPerRunBudget struct {
+	Configured bool    `json:"configured"`
+	BudgetUSD  float64 `json:"budget_usd,omitempty"`
+	ParseError string  `json:"parse_error,omitempty"`
 }
 
 // gateRefusalsPush 是推送通道的自检面（#36）。
@@ -233,6 +244,7 @@ type gateRefusalEntry struct {
 	Dimension    string   `json:"dimension"`
 	Path         string   `json:"path"`
 	IssueID      string   `json:"issue_id"`
+	TaskID       string   `json:"task_id,omitempty"`
 	AgentID      string   `json:"agent_id"`
 	Depth        *int     `json:"depth,omitempty"`
 	DepthLimit   *int     `json:"depth_limit,omitempty"`
@@ -271,6 +283,7 @@ func printGateRefusalsTable(out io.Writer, reports []gateRefusalsReport) {
 	if total == 0 {
 		fmt.Fprintf(out, "没有任何拒绝记录。\n")
 		fmt.Fprintf(out, "注意：累计是进程内的，服务重启即清零；且只含**当前运行的进程**见到的拒绝。\n")
+		printPerRunBudgetStatus(out, reports)
 		printGatePushStatus(out, reports)
 		return
 	}
@@ -294,7 +307,68 @@ func printGateRefusalsTable(out io.Writer, reports []gateRefusalsReport) {
 		fmt.Fprintf(os.Stderr, "gate-refusals: 渲染表格失败: %v\n", err)
 	}
 	fmt.Fprintf(out, "\n深度耗尽可以换一条链重来；预算是 per_issue 累计，不会自己归零。\n")
+	printPerRunBudgetStatus(out, reports)
 	printGatePushStatus(out, reports)
+}
+
+// printPerRunBudgetStatus 打印 per_run 成本上限的设防情况（#40）。
+//
+// **没有任何拒绝记录时也要打印**：6.8 第 3 条要的是「不允许静默」。一个没设上限的系统
+// 如果什么都不显示，和一个设了很大上限的系统长得一模一样——看不出区别就等于没有区别。
+func printPerRunBudgetStatus(out io.Writer, reports []gateRefusalsReport) {
+	var found bool
+	for _, r := range reports {
+		if r.PerRunBudget != nil {
+			found = true
+			break
+		}
+	}
+	fmt.Fprintf(out, "\n单轮成本上限（#40）\n")
+	if !found {
+		fmt.Fprintf(out, "两个进程都没有报告这一层——这道闸门只在 API 进程里，确认服务端已带着本次改动重启。\n")
+		return
+	}
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "来源\t状态")
+	for _, r := range reports {
+		if r.PerRunBudget == nil {
+			continue
+		}
+		switch {
+		case r.PerRunBudget.ParseError != "":
+			fmt.Fprintf(tw, "%s\t配错了：%s（按未配置处理）\n", r.Source, r.PerRunBudget.ParseError)
+		case !r.PerRunBudget.Configured:
+			fmt.Fprintf(tw, "%s\t未设上限\n", r.Source)
+		default:
+			fmt.Fprintf(tw, "%s\t$%.4f\n", r.Source, r.PerRunBudget.BudgetUSD)
+		}
+	}
+	if err := tw.Flush(); err != nil {
+		fmt.Fprintf(os.Stderr, "gate-refusals: 渲染单轮成本上限失败: %v\n", err)
+	}
+
+	// 收尾这句要说**当前这个状态**意味着什么，不能一律说「没配上」。人明明配了、
+	// 只是配错时，再让他去配一次是在骗他。
+	var anyParseError, anyConfigured bool
+	for _, r := range reports {
+		if r.PerRunBudget == nil {
+			continue
+		}
+		if r.PerRunBudget.ParseError != "" {
+			anyParseError = true
+		} else if r.PerRunBudget.Configured {
+			anyConfigured = true
+		}
+	}
+	switch {
+	case anyParseError:
+		fmt.Fprintf(out, "读不懂的值按**未配置**处理，不熔断。它不会被当成 0——那等于「什么都熔断」。\n")
+	case anyConfigured:
+		fmt.Fprintf(out, "已设防：一轮 Run 的折算成本越过上限就停掉它，每轮单独计。\n")
+	default:
+		fmt.Fprintf(out, "未设上限时**不熔断**，这是明示的而不是漏的；配上 %s 才生效。\n",
+			service.RunCostBudgetEnvVar)
+	}
 }
 
 // printGatePushStatus 打印推送通道的自检面。
@@ -342,6 +416,8 @@ func gateRefusalDimensionLabel(dimension string) string {
 		return "深度"
 	case "delegation_budget_exceeded":
 		return "预算"
+	case "run_cost_budget_exceeded":
+		return "单轮成本"
 	default:
 		return dimension
 	}
@@ -356,8 +432,14 @@ func gateRefusalDetail(n gateRefusalEntry) string {
 		return fmt.Sprintf("深度 %d / 上限 %d", *n.Depth, *n.DepthLimit)
 	}
 	if n.SpentUSD != nil && n.BudgetUSD != nil {
-		return fmt.Sprintf("已花 $%.4f / 上限 $%.4f；%d 行计价、%d 行算不出来",
+		detail := fmt.Sprintf("已花 $%.4f / 上限 $%.4f；%d 行计价、%d 行算不出来",
 			*n.SpentUSD, *n.BudgetUSD, derefInt(n.PricedRows), derefInt(n.UnpricedRows))
+		// per_run 是按 Run 判的，指到那一轮——否则「这条 Issue 上有一轮超了」等于
+		// 没说，重跑时不知道该看哪个。
+		if n.TaskID != "" {
+			detail = fmt.Sprintf("Run %s：%s", shortUUID(n.TaskID), detail)
+		}
+		return detail
 	}
 	return "—"
 }

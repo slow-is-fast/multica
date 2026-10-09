@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/gaterefusal"
+	"github.com/multica-ai/multica/server/internal/service"
 )
 
 // GetGateRefusals 返回本进程记录的闸门拒绝回执，最新的在前。
@@ -25,5 +26,11 @@ func (h *Handler) GetGateRefusals(w http.ResponseWriter, r *http.Request) {
 		"notices":      gaterefusal.Snapshot(),
 		// #36：推送通道的自检面。未配置时 Configured=false，其余字段为空。
 		"push": gaterefusal.PushStatusSnapshot(),
+		// #40：per_run 成本上限的设防情况。放在这里是因为**这道闸门跑在 API 进程**——
+		// 用量上报是 API 端点，不像委派闸门那样两进程都有份。
+		//
+		// 未配置必须能被看出来：一个没设上限的系统，如果界面上什么都不显示，和一个
+		// 设了很大上限的系统长得一模一样。6.8 第 3 条要的「不允许静默」包括这一条。
+		"per_run_budget": service.RuelRunCostBudgetStatusFromEnv(),
 	})
 }
