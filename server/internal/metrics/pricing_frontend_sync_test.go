@@ -315,7 +315,7 @@ func TestEstimateUsageCostAgreesWithFrontendFormula(t *testing.T) {
 		if !ok {
 			t.Fatalf("frontend table has no key %q — parser or table changed", tc.frontendKey)
 		}
-		server := EstimateUsageCost(tc.model, 0, tc.input, tc.output, tc.cacheRead, tc.cacheWrite)
+		server := EstimateUsageCost(tc.model, "", 0, tc.input, tc.output, tc.cacheRead, tc.cacheWrite)
 		if server.Source == CostSourceUnpriced {
 			t.Fatalf("%s: server resolved no rate — the alias rules no longer reach this row", tc.model)
 		}

@@ -186,8 +186,8 @@ func TestPlanShowsTheCostSwing(t *testing.T) {
 	}
 	total := logPlan([]candidate{row})
 
-	before := metrics.EstimateUsageCost("unknown", 0, row.InputTokens, row.Output, row.CacheRead, row.CacheWrite)
-	after := metrics.EstimateUsageCost("gpt-5.6-sol", 0, row.InputTokens, row.Output, row.CacheRead, row.CacheWrite)
+	before := metrics.EstimateUsageCost("unknown", "", 0, row.InputTokens, row.Output, row.CacheRead, row.CacheWrite)
+	after := metrics.EstimateUsageCost("gpt-5.6-sol", "codex", 0, row.InputTokens, row.Output, row.CacheRead, row.CacheWrite)
 	if before.Priceable() {
 		t.Fatalf("placeholder model must be unpriced, got %s %.6f", before.Source, before.USD)
 	}

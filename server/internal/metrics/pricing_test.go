@@ -362,11 +362,24 @@ func TestPriceForModelAliasNoFalseBorrowing(t *testing.T) {
 		"qwen3.6-flash[]",
 		"qwen3.8-max[]",
 		"qwen3.8-max-preview[]",
-		// GLM-5's neighbours are distinct SKUs at their own rates: they must
-		// not borrow the GLM-5 row just because its id is a prefix of theirs.
-		"glm-5.1",
-		"glm-5-turbo",
+		// GLM-5's own id is a prefix of its neighbours, so the neighbours
+		// must not borrow its row: they now have rows of their own
+		// (ruel#44) at different rates, and `-preview` is a distinct SKU
+		// at an unknown rate.
 		"glm-5-preview",
+		"glm-5.2",
+		// Same trap one family down: `glm-4.5` is a prefix of `glm-4.5-air`
+		// (3x cheaper), and `glm-4.7` is a prefix of `glm-4.7-flash` (free).
+		"glm-4.8",
+		"glm-4.5-air-free",
+		// Cursor's generic ids must not resolve bare — `auto` is also what
+		// codex reports, so resolving it here would be a cross-provider
+		// misprice rather than a coverage win.
+		"auto",
+		"composer-1",
+		"composer-2.5",
+		"codex/auto",
+		"openai/auto",
 	} {
 		if _, ok := PriceForModelAlias(model); ok {
 			t.Fatalf("PriceForModelAlias(%q) unexpectedly resolved", model)
@@ -648,8 +661,13 @@ func TestPriceForModelAliasAnthropicOpus55(t *testing.T) {
 // reported no model at all: 28,833 input / 969 output / 122,880 cache read.
 func TestEstimateUsageCostKeepsUnknownApartFromZero(t *testing.T) {
 	cases := []struct {
-		name       string
-		model      string
+		name  string
+		model string
+		// provider is the reporter, and it is part of the price lookup: some
+		// ids (`auto`) are only meaningful once you know who sent them.
+		// Empty means "no provider recorded", which is what the older rows
+		// look like and what the bare-model fallback exists for.
+		provider   string
 		ticks      int64
 		in, out    int64
 		cr, cw     int64
@@ -683,7 +701,7 @@ func TestEstimateUsageCostKeepsUnknownApartFromZero(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		got := EstimateUsageCost(tc.model, tc.ticks, tc.in, tc.out, tc.cr, tc.cw)
+		got := EstimateUsageCost(tc.model, tc.provider, tc.ticks, tc.in, tc.out, tc.cr, tc.cw)
 		if got.Source != tc.wantSource {
 			t.Errorf("%s: source = %q, want %q", tc.name, got.Source, tc.wantSource)
 		}
@@ -696,8 +714,8 @@ func TestEstimateUsageCostKeepsUnknownApartFromZero(t *testing.T) {
 	}
 
 	// The two 0s are different: only one of them may enter an aggregate.
-	unknown := EstimateUsageCost("unknown", 0, 28_833, 969, 122_880, 0)
-	free := EstimateUsageCost("glm-5", 0, 0, 0, 0, 0)
+	unknown := EstimateUsageCost("unknown", "codex", 0, 28_833, 969, 122_880, 0)
+	free := EstimateUsageCost("glm-5", "", 0, 0, 0, 0, 0)
 	if unknown.Priceable() {
 		t.Error("unpriced row is Priceable(); it must be excluded from medians and budgets")
 	}
@@ -725,7 +743,7 @@ func TestEstimateUsageCostKeepsUnknownApartFromZero(t *testing.T) {
 func TestEstimateUsageCostPricesTheModelCodexNowReports(t *testing.T) {
 	const codexIn, codexOut, codexCacheRead = 14_512, 773, 109_184
 
-	before := EstimateUsageCost("unknown", 0, codexIn, codexOut, codexCacheRead, 0)
+	before := EstimateUsageCost("unknown", "codex", 0, codexIn, codexOut, codexCacheRead, 0)
 	if before.Source != CostSourceUnpriced {
 		t.Fatalf("pre-fix codex row: source = %q, want %q", before.Source, CostSourceUnpriced)
 	}
@@ -733,7 +751,7 @@ func TestEstimateUsageCostPricesTheModelCodexNowReports(t *testing.T) {
 		t.Fatal("pre-fix codex row is Priceable(); it must stay out of medians and budgets")
 	}
 
-	after := EstimateUsageCost("gpt-5.6-sol", 0, codexIn, codexOut, codexCacheRead, 0)
+	after := EstimateUsageCost("gpt-5.6-sol", "codex", 0, codexIn, codexOut, codexCacheRead, 0)
 	if after.Source != CostSourceTable {
 		t.Fatalf("post-fix codex row: source = %q, want %q", after.Source, CostSourceTable)
 	}

@@ -337,6 +337,37 @@ func matchModelAlias(model string) (ModelPrice, bool) {
 	return ModelPrice{}, false
 }
 
+// PriceForModel resolves a usage row's (model, provider) pair, and MUST be
+// preferred over PriceForModelAlias wherever a provider is known.
+//
+// Why the provider is not optional: some ids are generic across providers.
+// Cursor reports `auto` and `composer-*`; codex also reports `auto` (see
+// ModelPlaceholderValues in model_completeness.go, which calls out exactly this
+// collision). The frontend therefore keys such ids as `cursor/auto` and tries
+// the provider-qualified form BEFORE the bare one. Pricing a bare `auto` here
+// would bill a codex run at Cursor's rate — a cross-provider misprice, which is
+// the same class of bug this whole table exists to prevent, just in a new
+// direction.
+//
+// The qualified-first order mirrors `pricingCandidates` in
+// packages/views/runtimes/utils.ts so both sides pick the same row.
+func PriceForModel(model, provider string) (ModelPrice, bool) {
+	m := strings.ToLower(strings.TrimSpace(model))
+	p := strings.ToLower(strings.TrimSpace(provider))
+	if p != "" && m != "" {
+		// qualify() in utils.ts leaves an already-qualified key alone, so a
+		// model that already carries its own provider does not get doubled.
+		qualified := m
+		if !strings.HasPrefix(m, p+"/") {
+			qualified = p + "/" + m
+		}
+		if price, ok := PriceForModelAlias(qualified); ok {
+			return price, true
+		}
+	}
+	return PriceForModelAlias(m)
+}
+
 func PriceForModelAlias(model string) (ModelPrice, bool) {
 	model = strings.ToLower(strings.TrimSpace(model))
 	if price, ok := matchModelAlias(model); ok {
@@ -421,7 +452,7 @@ func (c UsageCost) Priceable() bool {
 // one place on purpose: the client has no "unpriced" state and returns a plain
 // number, leaving the caller to notice that a row with tokens priced to 0. The
 // enum here exists so that noticing is not optional.
-func EstimateUsageCost(model string, providerTicks, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int64) UsageCost {
+func EstimateUsageCost(model, provider string, providerTicks, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int64) UsageCost {
 	if providerTicks > 0 {
 		return UsageCost{USD: float64(providerTicks) / CostUSDTicksPerUSD, Source: CostSourceProvider}
 	}
@@ -430,7 +461,7 @@ func EstimateUsageCost(model string, providerTicks, inputTokens, outputTokens, c
 		// Nothing was consumed. This really is free, not unknown.
 		return UsageCost{USD: 0, Source: CostSourceZero}
 	}
-	price, ok := PriceForModelAlias(model)
+	price, ok := PriceForModel(model, provider)
 	if !ok {
 		return UsageCost{USD: 0, Source: CostSourceUnpriced}
 	}

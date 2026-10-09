@@ -121,7 +121,7 @@ func RuelRunCostFromUsage(rows []db.TaskUsage) RuelRunCost {
 		if r.CostUsdTicks.Valid {
 			providerTicks = r.CostUsdTicks.Int64
 		}
-		c := metrics.EstimateUsageCost(r.Model, providerTicks, r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheWriteTokens)
+		c := metrics.EstimateUsageCost(r.Model, r.Provider, providerTicks, r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheWriteTokens)
 		if !c.Priceable() {
 			acc.UnpricedRows++
 			continue

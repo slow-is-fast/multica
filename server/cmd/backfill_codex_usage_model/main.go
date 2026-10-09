@@ -89,6 +89,13 @@ type candidate struct {
 	CacheRead   int64
 	CacheWrite  int64
 
+	// Provider is not selected per row: the load query pins every candidate
+	// to cfg.provider, so there is exactly one value per run. It is carried
+	// on the row anyway because EstimateUsageCost prices generic ids
+	// (codex's `auto`, Cursor's `auto`) only when it knows which provider
+	// reported them — a bare `auto` is ambiguous and must not be priced.
+	Provider string
+
 	// resolved by resolve(), not by the database
 	ResolvedModel string
 	RolloutPath   string
@@ -278,6 +285,7 @@ SELECT tu.id::text,
 		); err != nil {
 			return nil, fmt.Errorf("scan placeholder-model codex row: %w", err)
 		}
+		c.Provider = cfg.provider
 		out = append(out, c)
 	}
 	if err := rows.Err(); err != nil {
@@ -350,8 +358,8 @@ func logPlan(rows []candidate) totals {
 			continue
 		}
 		total.Resolved++
-		before := metrics.EstimateUsageCost(c.Model, 0, c.InputTokens, c.Output, c.CacheRead, c.CacheWrite)
-		after := metrics.EstimateUsageCost(c.ResolvedModel, 0, c.InputTokens, c.Output, c.CacheRead, c.CacheWrite)
+		before := metrics.EstimateUsageCost(c.Model, c.Provider, 0, c.InputTokens, c.Output, c.CacheRead, c.CacheWrite)
+		after := metrics.EstimateUsageCost(c.ResolvedModel, c.Provider, 0, c.InputTokens, c.Output, c.CacheRead, c.CacheWrite)
 		if before.Priceable() {
 			total.BeforePriced++
 			total.BeforeUSD += before.USD
