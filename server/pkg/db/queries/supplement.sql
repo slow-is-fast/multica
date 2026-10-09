@@ -268,3 +268,22 @@ FOR UPDATE;
 -- name: DeleteTaskSupplementByComment :exec
 DELETE FROM task_supplement
 WHERE comment_id = @comment_id AND workspace_id = @workspace_id;
+
+-- name: RuelRequeueTaskSupplement :one
+-- Ruel #42: release ONE binding so the completion-reconcile query can see the
+-- comment again. Scoped to comment_id AND task_id because one comment can steer
+-- several runs; releasing every binding would silently re-open the others.
+--
+-- attempt_count = 0 is the whole point: the supplement was never claimed, so
+-- the agent never saw this text and replaying it cannot duplicate anything.
+-- A claimed-but-unacknowledged row (attempt_count > 0) may already be in the
+-- turn's context — its ack may simply be late — so it is excluded here. That
+-- case has different semantics and is deliberately out of scope for #42.
+DELETE FROM task_supplement
+WHERE comment_id = @comment_id
+  AND task_id = @task_id
+  AND workspace_id = @workspace_id
+  AND status = 'failed'
+  AND failure_reason = 'turn_ended'
+  AND attempt_count = 0
+RETURNING *;

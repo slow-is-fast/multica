@@ -828,3 +828,40 @@ func (q *Queries) StartAgentTaskWithSupplement(ctx context.Context, arg StartAge
 	)
 	return i, err
 }
+
+const ruelRequeueTaskSupplement = `-- name: RuelRequeueTaskSupplement :one
+DELETE FROM task_supplement
+WHERE comment_id = $1
+  AND task_id = $2
+  AND workspace_id = $3
+  AND status = 'failed'
+  AND failure_reason = 'turn_ended'
+  AND attempt_count = 0
+RETURNING task_id, workspace_id, issue_id, comment_id, author_id, client_request_id, status, failure_reason, attempt_count, created_at, updated_at, delivered_at
+`
+
+type RuelRequeueTaskSupplementParams struct {
+	CommentID   pgtype.UUID `json:"comment_id"`
+	TaskID      pgtype.UUID `json:"task_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) RuelRequeueTaskSupplement(ctx context.Context, arg RuelRequeueTaskSupplementParams) (TaskSupplement, error) {
+	row := q.db.QueryRow(ctx, ruelRequeueTaskSupplement, arg.CommentID, arg.TaskID, arg.WorkspaceID)
+	var i TaskSupplement
+	err := row.Scan(
+		&i.TaskID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.CommentID,
+		&i.AuthorID,
+		&i.ClientRequestID,
+		&i.Status,
+		&i.FailureReason,
+		&i.AttemptCount,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeliveredAt,
+	)
+	return i, err
+}

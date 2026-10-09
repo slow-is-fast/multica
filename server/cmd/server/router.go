@@ -2061,6 +2061,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
 					r.With(handler.RequireHumanActor).Post("/tasks/{taskId}/supplements", h.CreateTaskSupplement)
 					r.With(handler.RequireHumanActor).Post("/tasks/{taskId}/supplements/{commentId}/retry", h.RetryTaskSupplement)
+					// Ruel #42：PRD 6.2.1 的硬约束——failed 的追加指导要有退路。
+					// retry 要求那一轮仍在 running，这里补的是「那一轮已经结束了」这一半。
+					r.With(handler.RequireHumanActor).Post("/tasks/{taskId}/supplements/{commentId}/requeue", h.RuelRequeueTaskSupplement)
 					r.Post("/rerun", h.RerunIssue)
 					r.Post("/quick-actions/{quickActionId}/run", h.RunQuickAction)
 					r.Post("/quick-actions/{quickActionId}/render", h.RenderQuickAction)
