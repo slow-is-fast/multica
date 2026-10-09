@@ -15,6 +15,7 @@ import {
   formatTokens,
   isModelPriced,
   isSelfHealingRuntime,
+  type Priceable,
   sliceWindow,
   summarizeTaskUsage,
   summarizeTaskUsageAcross,
@@ -948,6 +949,57 @@ describe("estimateCost", () => {
     expect(isModelPriced("grok-composer-2.5-fast", "xai")).toBe(false);
   });
 
+
+  // Real usage rows from this machine, priced through the UI code and
+  // compared with the server. This is the cross-language half of
+  // "one price list, one number" (ruel#39): the rate table is generated
+  // from the server so it cannot drift, but the FORMULA is still written
+  // twice — once here and once in
+  // server/internal/metrics/pricing.go. These six rows are what keeps
+  // the two implementations honest: if either side changes how it
+  // handles provider ticks, uncosted tokens or the token mix, this
+  // total moves.
+  //
+  // Server total for the same six rows: $0.849250 (EstimateUsageCost,
+  // source=table). Verified 2026-10-09.
+  it("prices this machine's real usage rows the same way the server does", () => {
+    const rows: Priceable[] = [
+      { model: "gpt-5.6-sol", provider: "codex", input_tokens: 14817, output_tokens: 825, cache_read_tokens: 133632, cache_write_tokens: 0, cost_usd_ticks: 0 },
+      { model: "gpt-5.6-sol", provider: "codex", input_tokens: 14010, output_tokens: 598, cache_read_tokens: 84096, cache_write_tokens: 0, cost_usd_ticks: 0 },
+      { model: "gpt-5.6-sol", provider: "codex", input_tokens: 15172, output_tokens: 887, cache_read_tokens: 111104, cache_write_tokens: 0, cost_usd_ticks: 0 },
+      { model: "glm-5", provider: "claude", input_tokens: 64389, output_tokens: 1257, cache_read_tokens: 54784, cache_write_tokens: 0, cost_usd_ticks: 0 },
+      { model: "glm-5", provider: "claude", input_tokens: 77390, output_tokens: 1675, cache_read_tokens: 299520, cache_write_tokens: 0, cost_usd_ticks: 0 },
+      { model: "glm-5", provider: "claude", input_tokens: 91974, output_tokens: 3082, cache_read_tokens: 358400, cache_write_tokens: 0, cost_usd_ticks: 0 },
+    ];
+    const total = rows.reduce((sum, r) => sum + estimateCost(r), 0);
+    expect(total).toBeCloseTo(0.84925, 5);
+    // Per-row agreement, not just the total: a total can stay right while
+    // two rows each move in opposite directions.
+    expect(rows.map((r) => +estimateCost(r).toFixed(6))).toEqual([
+      0.165651, 0.130038, 0.158022, 0.079368, 0.142654, 0.173516,
+    ]);
+  });
+
+  // The other half of the same criterion: a model neither table carries
+  // must be reported as "cannot be priced", not as $0.00. The server
+  // returns CostSourceUnpriced with Priceable() false; here the model has
+  // to land in collectUnmappedModels so the UI can say so out loud.
+  it("reports a model with no rate as unmapped rather than as zero cost", () => {
+    const row: Priceable = {
+      model: "totally-unknown-model",
+      provider: "codex",
+      input_tokens: 10_000,
+      output_tokens: 1_000,
+      cache_read_tokens: 50_000,
+      cache_write_tokens: 0,
+      cost_usd_ticks: 0,
+    };
+    // It is deliberately excluded from the total the server would put in
+    // a budget, so it must not contribute dollars here either — but the
+    // difference is that the UI also has to name it.
+    expect(estimateCost(row)).toBe(0);
+    expect(collectUnmappedModels([row])).toEqual(["codex/totally-unknown-model"]);
+  });
   it("recognises the provider-prefixed forms emitted by OpenRouter-style runtimes", () => {
     // opencode + OpenRouter route IDs through as `<provider>/<model>`.
     // canonicalCandidates strips the prefix; without this the rows above
