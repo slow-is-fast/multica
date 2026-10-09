@@ -583,8 +583,14 @@ describe("estimateCost", () => {
   // header comment. Pinning them in tests is what catches a future edit
   // that copies a price from a near-named neighbour by accident — the
   // mistake the previous attempt (PR #3170, closed) made.
-  it("prices deepseek-v4-flash at the official $0.14/$0.28 with ~50× cache-hit discount", () => {
-    // 1M input × $0.14 + 1M output × $0.28 + 1M cache read × $0.0028 = $0.4228.
+  // $0.14/$0.28 is the PROMO price (a quarter of standard) and the row
+  // deliberately does not use it: both DeepSeek SKUs are 75% off until
+  // 2026-05-31, and pricing at the promo rate makes every budget jump 4x
+  // on June 1. The rate below is the post-promo standard one; see the
+  // DeepSeek comment in server/internal/metrics/pricing.go, which is now
+  // where a rate is edited.
+  it("prices deepseek-v4-flash at the post-promo standard $0.56/$1.12 with ~50× cache-hit discount", () => {
+    // 1M input × $0.56 + 1M output × $1.12 + 1M cache read × $0.0112 = $1.6912.
     const cost = estimateCost({
       ...zeroUsage,
       model: "deepseek-v4-flash",
@@ -592,7 +598,7 @@ describe("estimateCost", () => {
       output_tokens: 1_000_000,
       cache_read_tokens: 1_000_000,
     });
-    expect(cost).toBeCloseTo(0.14 + 0.28 + 0.0028, 5);
+    expect(cost).toBeCloseTo(0.56 + 1.12 + 0.0112, 5);
   });
 
   it("prices the deepseek-chat / deepseek-reasoner aliases at the same rate as deepseek-v4-flash", () => {
