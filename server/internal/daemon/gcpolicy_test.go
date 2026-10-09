@@ -99,7 +99,7 @@ func TestPolicyGC_ServerRecordsAreExplicitlyUnknown(t *testing.T) {
 	}
 }
 
-// TestPolicyGC_EveryClassHasARow 守「四类历史各一行」，不漏不省。
+// TestPolicyGC_EveryClassHasARow 守「每一类各一行」，不漏不省。
 func TestPolicyGC_EveryClassHasARow(t *testing.T) {
 	d := newGCPlanTestDaemon(t)
 	d.cfg.WorkspacesRoot = t.TempDir()
@@ -108,13 +108,70 @@ func TestPolicyGC_EveryClassHasARow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PolicyGC: %v", err)
 	}
-	for _, class := range []string{"workdir", "cli_session", "approved_knowledge", "cache", "server_record"} {
+	for _, class := range []string{"workdir", "cli_session", "approved_knowledge", "ruel_project_knowledge", "cache", "server_record"} {
 		if e := policyEntryFor(t, report, class); e.Label == "" {
 			t.Errorf("类别 %q 缺 Label", class)
 		}
 	}
 	if report.Scope == "" {
 		t.Error("报告必须写明覆盖范围：没列出来的东西会被读成不会清理")
+	}
+}
+
+// TestPolicyGC_ProjectKnowledgeIsSeparateFromApprovedKnowledge 守 #47 点名的那个坑。
+//
+// PRD 5.3 给第三类保留起的名字是「经审阅的项目知识」（approved_knowledge_retention），
+// 而上游早就有一个 approved_knowledge 类——它扫的是执行机上的
+// hermes-state/<agent>/<profile>/memories/，即 Hermes 的文件型长期记忆。
+// 两者**同名不同物**：合并或名字相近地并列之后，没人分得清删的是哪个。
+//
+// 所以三件事要同时成立：
+//  1. 各占一行且 Class 不同；
+//  2. 项目知识这一类**不编 TTL、不编开关**——它在服务端库里，daemon 既看不到也删不动，
+//     而服务端目前没有任何保留机制。给个数字就是撒谎，比不给数更糟；
+//  3. 两行的 Note 各自**逐字引用对方的 Label**。只靠 Label 不同不够——用户读的是说明，
+//     说明里的引用对不上标签，等于没引用。
+func TestPolicyGC_ProjectKnowledgeIsSeparateFromApprovedKnowledge(t *testing.T) {
+	d := newGCPlanTestDaemon(t)
+	d.cfg.WorkspacesRoot = t.TempDir()
+
+	report, err := d.PolicyGC(context.Background())
+	if err != nil {
+		t.Fatalf("PolicyGC: %v", err)
+	}
+	pk := policyEntryFor(t, report, "ruel_project_knowledge")
+	ak := policyEntryFor(t, report, "approved_knowledge")
+
+	if pk.Class == ak.Class {
+		t.Fatal("项目知识与 approved_knowledge 共用一个 Class；合并之后没人分得清删的是哪个")
+	}
+	// 它是服务端存储：量不出来必须和「量出来是 0」分开。
+	if pk.Measurable {
+		t.Error("项目知识被标为可统计；它在服务端库里，daemon 量不到")
+	}
+	if pk.SizeKnown {
+		t.Error("项目知识的 SizeKnown = true；量不出来必须和「量出来是 0」分开")
+	}
+	if pk.Retention != "" {
+		t.Errorf("项目知识给了一个保留时长 %q；服务端没有清理机制，展示一个不存在的策略等于撒谎", pk.Retention)
+	}
+	if pk.EnvVar != "" {
+		t.Errorf("项目知识声明了开关 %q；不存在这个开关", pk.EnvVar)
+	}
+	if pk.Note == "" {
+		t.Fatal("项目知识没有说明；静默留空会被读成「不会清理」")
+	}
+	// 两行互相点明对方所在的一侧，读者才能把名字相近的两类分开。
+	//
+	// 查到「逐字引用对方的 Label」这一层，而不是只查关键词。只查关键词的话，
+	// 说明里的引用文字和那一行实际显示的标签可以不一致——曾经就是这样：
+	// Note 写着「机器文件记忆」而 Label 是「执行机文件记忆」，读者按名字去对
+	// 反而对不上。这两行存在的唯一目的就是让人分清彼此，引用必须能被对上。
+	if !strings.Contains(pk.Note, ak.Label) {
+		t.Errorf("项目知识的说明没有逐字引用经批准知识的标签 %q，读者按名字对不上：%q", ak.Label, pk.Note)
+	}
+	if !strings.Contains(ak.Note, pk.Label) {
+		t.Errorf("经批准知识的说明没有逐字引用项目知识的标签 %q，读者按名字对不上：%q", pk.Label, ak.Note)
 	}
 }
 

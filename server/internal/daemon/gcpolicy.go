@@ -138,12 +138,17 @@ func (d *Daemon) PolicyGC(ctx context.Context) (GCPolicyReport, error) {
 		Note:        "删了是可恢复的：会话重启而不是失忆，重新登录即可",
 	})
 
-	// ---- 经批准知识 ----
+	// ---- 经批准知识（执行机上的 Hermes 文件记忆）----
+	//
+	// 注意 Label 特意带了「执行机文件记忆」这个限定语，见下面 ruel_project_knowledge
+	// 那条：PRD 5.3 给第三类保留起的名字正是「经审阅的项目知识」，而这一类扫的是
+	// hermes-state/<agent>/<profile>/memories/，是 provider 原生记忆，不是项目知识。
+	// 两者同名不同物，所以两行必须互相点明，否则没人分得清删的是哪个。
 	memRoot, memOK := execenv.HermesMemoryStoreRoot(d.cfg.Profile)
 	memSize, memCount := storeFootprint(memRoot, 2)
 	report.Entries = append(report.Entries, GCPolicyEntry{
 		Class:       "approved_knowledge",
-		Label:       "经批准知识",
+		Label:       "经批准知识（执行机文件记忆）",
 		Reclaimable: d.cfg.GCHermesMemoryTTL > 0,
 		Disabled:    d.cfg.GCHermesMemoryTTL <= 0,
 		Retention:   d.cfg.GCHermesMemoryTTL.String(),
@@ -153,7 +158,28 @@ func (d *Daemon) PolicyGC(ctx context.Context) (GCPolicyReport, error) {
 		SizeKnown:   memOK,
 		ItemCount:   memCount,
 		Measurable:  true,
-		Note:        "删掉是可见的失忆，所以默认最长（90 天）",
+		Note:        "删掉是可见的失忆，所以默认最长（90 天）。本类只扫执行机上的 Hermes 文件记忆，与「项目知识（服务端，经人审阅）」不是一回事",
+	})
+
+	// ---- 项目知识（服务端，经人审阅）----
+	//
+	// PRD 5.3 第三类保留的落点，存储是服务端的 ruel_project_knowledge 表（迁移 565）。
+	//
+	// 为什么**不给 TTL**：表在服务端，daemon 既看不到它也删不动它，而服务端目前
+	// 没有任何保留/清理机制（全库搜 retention 只命中 daemon 侧）。这与上面几类
+	// 的处理原则是同一条：**展示的必须是生效值**。给个 90 天会让用户以为有人会去删，
+	// 而实际上没有——那比不给数更糟。
+	//
+	// 为什么**不并进 server_record**：那一类是泛泛的「服务端记录」，没有具体策略；
+	// 这一类是 PRD 点名的保留类，且必须与 approved_knowledge 分开显示才看得出两者
+	// 不是一回事。合并进 server_record 会让「项目知识」这个名字从报告里消失。
+	report.Entries = append(report.Entries, GCPolicyEntry{
+		Class:      "ruel_project_knowledge",
+		Label:      "项目知识（服务端，经人审阅）",
+		Retention:  "",
+		SizeKnown:  false,
+		Measurable: false,
+		Note:       "与上面的「经批准知识（执行机文件记忆）」不是同一类：那一类落在 Agent 执行机的文件系统上，这一类落在服务端数据库里。本机既看不到也删不动，保留策略由服务端决定，本命令不给数",
 	})
 
 	// ---- 缓存类：bare repo 缓存 + 临时目录 ----
