@@ -15,6 +15,7 @@ import {
   formatTokens,
   isModelPriced,
   isSelfHealingRuntime,
+  isUsageRowUnpriced,
   type Priceable,
   sliceWindow,
   summarizeTaskUsage,
@@ -570,9 +571,13 @@ describe("estimateCost", () => {
   });
 
   it("reports provider-qualified keys for unmapped generic model ids", () => {
+    // Non-zero token counts on purpose: a row that consumed nothing is
+    // known-free, not unknown, so it no longer surfaces here (see
+    // `isUsageRowUnpriced`). These rows carry tokens because what is under
+    // test is the KEY, not the amount.
     const unmapped = collectUnmappedModels([
-      { ...zeroUsage, provider: "acme", model: "auto" },
-      { ...zeroUsage, provider: "cursor", model: "auto" },
+      { ...zeroUsage, provider: "acme", model: "auto", input_tokens: 1_000 },
+      { ...zeroUsage, provider: "cursor", model: "auto", input_tokens: 1_000 },
     ]);
     // Same bare id, two providers → two distinct, priceable-by-key entries.
     // `cursor/auto` is priced, so only the genuinely-unmapped one surfaces.
@@ -1060,12 +1065,89 @@ describe("isModelPriced", () => {
 
 describe("collectUnmappedModels", () => {
   it("only surfaces names that miss every pricing tier", () => {
+    // Token counts are non-zero for the same reason as the generic-id case
+    // above: the zero-token row is known-free now, and what is under test
+    // here is which NAMES surface.
     const rows = [
-      { ...zeroUsage, model: "claude-sonnet-4-6" },
-      { ...zeroUsage, model: "gpt-5-codex" },
-      { ...zeroUsage, model: "fictional-model-x" },
+      { ...zeroUsage, model: "claude-sonnet-4-6", input_tokens: 1_000 },
+      { ...zeroUsage, model: "gpt-5-codex", input_tokens: 1_000 },
+      { ...zeroUsage, model: "fictional-model-x", input_tokens: 1_000 },
     ];
     expect(collectUnmappedModels(rows)).toEqual(["fictional-model-x"]);
+  });
+});
+
+// The per-row question the totals and the banner both have to answer the
+// same way. Four states; only `unpriced` is unknown, and the two that look
+// like it from one angle each — "no rate on file" and "no money on this
+// row" — are the ones worth pinning, because getting either wrong silently
+// corrupts a total:
+//
+//   calling the first one unpriced throws away money the provider really
+//   charged;
+//   calling the second one unpriced invents a "we couldn't price this"
+//   warning about a row that never spent anything.
+describe("isUsageRowUnpriced", () => {
+  const unpricedRow = {
+    model: "totally-unknown-model",
+    provider: "acme",
+    input_tokens: 1_000,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+  };
+
+  it("is true only when tokens need a rate and nobody priced them", () => {
+    expect(isUsageRowUnpriced(unpricedRow)).toBe(true);
+  });
+
+  it("is false for a row the provider billed in full, rate or no rate", () => {
+    // `estimateCost` = bill + estimate, and this row is all bill: dropping
+    // it from a total would throw away real money.
+    expect(
+      isUsageRowUnpriced({
+        ...unpricedRow,
+        cost_usd_ticks: 5_000_000_000,
+        uncosted_input_tokens: 0,
+        uncosted_output_tokens: 0,
+        uncosted_cache_read_tokens: 0,
+        uncosted_cache_write_tokens: 0,
+      }),
+    ).toBe(false);
+  });
+
+  it("is true when the provider billed part and left the rest unpriced", () => {
+    // The mirror image: money on the row AND tokens with no rate. It must
+    // still count as unpriced — the unpriced half is unknown, and a total
+    // that quietly treats it as complete is the #24 failure mode.
+    expect(
+      isUsageRowUnpriced({
+        ...unpricedRow,
+        cost_usd_ticks: 5_000_000_000,
+        uncosted_input_tokens: 1_000,
+      }),
+    ).toBe(true);
+  });
+
+  it("is false for a row that consumed nothing — known-free, not unknown", () => {
+    // The server calls this `CostSourceZero` (priceable). Reporting it as
+    // "we couldn't price 1 row" would warn the user about nothing.
+    expect(
+      isUsageRowUnpriced({ ...zeroUsage, model: "totally-unknown-model", provider: "acme" }),
+    ).toBe(false);
+  });
+
+  it("is false for a free tier whose rates are all zero", () => {
+    // Known-free too, and the reason a free tier has to be an all-zero row
+    // rather than a missing one: a missing row would be unknown.
+    // `glm-4.5-flash` ships an all-zero row in the generated table.
+    expect(isUsageRowUnpriced({ ...unpricedRow, model: "glm-4.5-flash", provider: "zhipu" })).toBe(
+      false,
+    );
+  });
+
+  it("is false for a row with no model at all", () => {
+    expect(isUsageRowUnpriced({ ...unpricedRow, model: "" })).toBe(false);
   });
 });
 

@@ -397,6 +397,53 @@ export function isModelPriced(model: string, provider?: string): boolean {
   return resolvePricing(model, provider) !== undefined;
 }
 
+// Whether this ONE row's cost is UNKNOWN rather than known-small.
+//
+// A row's cost is in one of four states — the same four the server's
+// `EstimateUsageCost` returns, and the distinction that matters is between
+// "known to be small" and "not known":
+//
+//   provider — the provider billed it (`cost_usd_ticks > 0`). Real money.
+//   table    — nothing billed, but the rate table prices the model. Estimated.
+//   zero     — nothing to price: no tokens consumed, or a free-tier row whose
+//              rates are all 0. Known-free, so it belongs in a total as a
+//              real 0 and must NOT raise "we couldn't price this".
+//   unpriced — tokens that need a rate, no rate on file, and no bill covering
+//              them. Only this state is unknown.
+//
+// The trap is that last state's second half. `estimateCost` is
+// `authoritative + estimate`, so one row can carry real money AND still have
+// unpriced tokens: the provider billed part of the turn and left the rest to
+// us. Dropping such a row from a total would throw away money that was
+// actually charged, so "no rate on file" must never decide this on its own —
+// only "no rate for tokens nobody else priced".
+//
+// The reverse trap is a row with no tokens at all: by the same test it looks
+// unpriced (no rate, nothing authoritative), but nothing was consumed, so it
+// is known-free. The server calls that `zero` and so do we — otherwise a
+// model with a missing rate would report "1 row we couldn't price" on an
+// issue that never spent anything.
+export function isUsageRowUnpriced(row: Priceable): boolean {
+  if (!row.model) return false;
+  if (isModelPriced(row.model, row.provider)) return false;
+  // Priced in full by the provider: nothing left for us to estimate.
+  const uncosted = uncostedTokens(row);
+  const needsEstimate =
+    uncosted.input > 0 ||
+    uncosted.output > 0 ||
+    uncosted.cacheRead > 0 ||
+    uncosted.cacheWrite > 0;
+  if (!needsEstimate && (row.cost_usd_ticks ?? 0) > 0) return false;
+  // Nothing was consumed — known-free, not unknown.
+  const consumed =
+    row.input_tokens +
+    row.output_tokens +
+    row.cache_read_tokens +
+    row.cache_write_tokens;
+  if (consumed <= 0) return false;
+  return true;
+}
+
 // Returns the unique, sorted list of pricing keys present in `rows` that
 // don't resolve to a price. Keys are provider-qualified (`cursor/auto`) when
 // the row carries a provider, so the same bare model id reported by two
@@ -406,18 +453,15 @@ export function isModelPriced(model: string, provider?: string): boolean {
 // raise the "we can't price this model" warning — its cost is already exact,
 // and asking the user to supply a rate for it would be asking them to override
 // a real bill with a guess.
+//
+// The per-row question lives in `isUsageRowUnpriced` because the totals need
+// the same answer this banner does. Two copies of "can we price this" would
+// drift — the banner would name a model whose rows the total quietly counted
+// as $0, which is the whole failure mode this diagnostic exists to surface.
 export function collectUnmappedModels(rows: readonly Priceable[]): string[] {
   const set = new Set<string>();
   for (const r of rows) {
-    if (!r.model || isModelPriced(r.model, r.provider)) continue;
-    const uncosted = uncostedTokens(r);
-    const needsEstimate =
-      uncosted.input > 0 ||
-      uncosted.output > 0 ||
-      uncosted.cacheRead > 0 ||
-      uncosted.cacheWrite > 0;
-    if (!needsEstimate && (r.cost_usd_ticks ?? 0) > 0) continue;
-    set.add(pricingKey(r.model, r.provider));
+    if (isUsageRowUnpriced(r)) set.add(pricingKey(r.model, r.provider));
   }
   return Array.from(set).toSorted();
 }
