@@ -73,6 +73,8 @@ const (
 	ReasonDelegationDepthExceeded = dispatch.ReasonDelegationDepthExceeded
 	// Ruel 新增：委派链的成本预算耗尽，见 dispatch.ReasonDelegationBudgetExceeded。
 	ReasonDelegationBudgetExceeded = dispatch.ReasonDelegationBudgetExceeded
+	// Ruel 新增：周期性成本维度（per_agent / per_workspace 日或月）耗尽。
+	ReasonPeriodBudgetExceeded = dispatch.ReasonPeriodBudgetExceeded
 )
 
 // DispatchTarget is the caller-visible reference to an execution target. Name

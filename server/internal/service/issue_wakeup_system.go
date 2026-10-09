@@ -679,6 +679,20 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 		}
 		return commit()
 	}
+	// Ruel 新增：周期成本预算闸门（#41）。同样用 pause 收尾，理由见 issue_wakeup.go
+	// 里那条——它会自己归零，但继续触发只会让回执变成噪音。
+	if err := s.Tasks.ruelGuardPeriodBudget(ctx, agent.ID, issue.WorkspaceID, issue.ID, "issue_wakeup_system"); err != nil {
+		if err = q.PauseIssueWakeup(ctx, db.PauseIssueWakeupParams{ID: w.ID, PausedReason: pgtype.Text{String: wakeupPausedPeriodBudget, Valid: true}, BlockRuns: true}); err != nil {
+			return err
+		}
+		if err = q.DiscardWakeupReceipts(ctx, w.ID); err != nil {
+			return err
+		}
+		if err = note(wakeupActivityPaused, map[string]any{"rule": SystemRuleChildDone, "reason": wakeupPausedPeriodBudget, "error": err.Error()}); err != nil {
+			return err
+		}
+		return commit()
+	}
 	contextJSON, _ := json.Marshal(map[string]any{"wakeup_id": util.UUIDToString(w.ID), "wakeup_revision": w.Revision, "wakeup_evidence": evidence, "wakeup_system": SystemRuleChildDone})
 	task, err = q.CreateWakeupTask(ctx, db.CreateWakeupTaskParams{
 		ID: dbid.NewV7(), AgentID: agent.ID, RuntimeID: agent.RuntimeID, IssueID: issue.ID, Priority: priorityToInt(issue.Priority),

@@ -48,6 +48,18 @@ const (
 	// 个要「人自己派一次单」才放行，这个只要把额度调高重跑即可。维度必须分开，否则
 	// 接收方会照着错的那个去处理。
 	DimensionRunCost = "run_cost_budget_exceeded"
+	// DimensionPeriodBudget 是「周期性钱」维度（#41）：per_agent / per_workspace 的
+	// 日 / 月上限。
+	//
+	// 归零方式是第三种：**按日历周期归零**。per_issue 不归零、per_run 每轮归零、这
+	// 个按日或月归零，所以它是唯一不需要「人显式放行」逃生门的一层——等到下一个周期
+	// 它自己就开了。
+	//
+	// 实际记录的维度名是它**加后缀**（如 `periodic_budget_exceeded.agent_daily`），
+	// 四个维度各一个后缀。分四个而不是合成一个，是因为**修法不同**：agent 日上限要
+	// 调这个 agent 的额度，workspace 月上限要调整个工作区——合并之后接收方不知道该
+	// 去找谁。
+	DimensionPeriodBudget = "periodic_budget_exceeded"
 )
 
 const (
@@ -103,9 +115,17 @@ var (
 
 // Record 记一次拒绝。
 //
-// 同一个 (Issue, 维度) 在 DedupeWindow 内重复出现时合并进已有那一条：计数 +1、时间戳前进、
-// 数字刷新为**最后一次**看到的（最近的一次最能说明现状）。其余字段保留第一次的——尤其是
-// Path，第一次被拒的入口才是排查时要看的那个。
+// 同一个 (Issue, Agent, Task, 维度) 在 DedupeWindow 内重复出现时合并进已有那一条：
+// 计数 +1、时间戳前进、数字刷新为**最后一次**看到的（最近的一次最能说明现状）。其余字段
+// 保留第一次的——尤其是 Path，第一次被拒的入口才是排查时要看的那个。
+//
+// **为什么 agent 要进合并键**：回执带着 agent_id，而 agent_id 是不刷新的（第一次的
+// 保留）。不进键的话，两个 agent 各自触限会揉成一条，第二个 agent 在回执里彻底消失
+// ——「哪个 agent 撞了墙」正是这条回执要回答的问题，把它抹掉等于白记。周期预算（#41）
+// 把这条逼出来了：四个维度里有两个就是按 agent 判的，一条链上换几个 agent 是常事。
+//
+// 对既有的委派两维度，agent 进键是**收紧**而不是放宽：同一条 Issue 上不同 agent 各自
+// 被挡，从此是两条回执而不是一条。之前那条只报了先撞墙的那个。
 func Record(n Notice) {
 	now := time.Now().UTC()
 	mu.Lock()
@@ -126,6 +146,7 @@ func Record(n Notice) {
 		// 此分成多条——这正是要的。
 		if existing.Dimension != n.Dimension ||
 			existing.IssueID != n.IssueID ||
+			existing.AgentID != n.AgentID ||
 			existing.TaskID != n.TaskID {
 			continue
 		}

@@ -115,6 +115,18 @@ const (
 	//
 	// 与 quota_exceeded 也分开：那个是 Cloud 的 autopilot 区间配额，这里是本机折算成本。
 	ReasonDelegationBudgetExceeded ReasonCode = "delegation_budget_exceeded"
+	// ReasonPeriodBudgetExceeded: Ruel 新增。某个周期性成本维度（per_agent /
+	// per_workspace 的日或月）累计已到上限，拒绝这一单（见
+	// service/ruel_period_budget.go）。
+	//
+	// 与 delegation_budget_exceeded 分开，是因为**出路不同**：那条是 per_issue 累计
+	// 不归零，撞上一次就是永久的，要人先解释那笔钱花在哪；这一条按日历周期归零，等
+	// 下一个周期自己就开了。混在一起，接收方会照着错的那个去处理——要么白等一个永远
+	// 不会到来的「下个周期」，要么去解释一笔其实会自动恢复的账。
+	//
+	// 与 run_cost_budget_exceeded 也分开：那个是**取消正在跑的那一轮**，这里是**不让
+	// 新的一轮开始**。
+	ReasonPeriodBudgetExceeded ReasonCode = "periodic_budget_exceeded"
 	// ReasonQuotaExceeded is a policy-neutral refusal for an exhausted
 	// Cloud-provided autopilot interval.
 	ReasonQuotaExceeded ReasonCode = "quota_exceeded"

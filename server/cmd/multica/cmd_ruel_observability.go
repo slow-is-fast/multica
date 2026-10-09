@@ -218,6 +218,8 @@ type gateRefusalsReport struct {
 	// #40：per_run 成本上限。只有 API 进程那份带它——这道闸门跑在用量上报的收口上，
 	// 而用量上报是 API 端点；daemon 侧从来没有这一层。
 	PerRunBudget *gateRefusalsPerRunBudget `json:"per_run_budget,omitempty"`
+	// #41：四个周期维度。
+	PeriodBudget *gateRefusalsPeriodBudget `json:"period_budget,omitempty"`
 }
 
 // gateRefusalsPerRunBudget 与 service.RuelRunCostBudgetStatus 的 JSON 形状对齐。
@@ -225,6 +227,35 @@ type gateRefusalsPerRunBudget struct {
 	Configured bool    `json:"configured"`
 	BudgetUSD  float64 `json:"budget_usd,omitempty"`
 	ParseError string  `json:"parse_error,omitempty"`
+}
+
+// gateRefusalsPeriodBudget 与 service.PeriodBudgetStatus 的 JSON 形状对齐。
+type gateRefusalsPeriodBudget struct {
+	At       string                        `json:"at"`
+	Statuses []gateRefusalsPeriodDimension `json:"statuses"`
+}
+
+// 形状与 service.PeriodBudgetConfig 的 JSON **逐字段对齐**。
+//
+// 对齐不上会静默出错：Go 的 json 解码遇到类型不符会整个失败（dimension 是对象而这里
+// 写成 string 时，整条命令只吐一句 unmarshal 错误），而不是少打印一列——所以这层不是
+// 「差不多就行」，改一处就得改两处。
+type gateRefusalsPeriodDimension struct {
+	Dimension  gateRefusalsPeriodDimensionID `json:"dimension"`
+	Key        string                        `json:"key"`
+	EnvVar     string                        `json:"env_var"`
+	Configured bool                          `json:"configured"`
+	BudgetUSD  float64                       `json:"usd,omitempty"`
+	ParseError string                        `json:"parse_error,omitempty"`
+	Window     struct {
+		Start string `json:"start"`
+		End   string `json:"end"`
+	} `json:"window"`
+}
+
+type gateRefusalsPeriodDimensionID struct {
+	Scope  string `json:"scope"`
+	Period string `json:"period"`
 }
 
 // gateRefusalsPush 是推送通道的自检面（#36）。
@@ -284,6 +315,7 @@ func printGateRefusalsTable(out io.Writer, reports []gateRefusalsReport) {
 		fmt.Fprintf(out, "没有任何拒绝记录。\n")
 		fmt.Fprintf(out, "注意：累计是进程内的，服务重启即清零；且只含**当前运行的进程**见到的拒绝。\n")
 		printPerRunBudgetStatus(out, reports)
+		printPeriodBudgetStatus(out, reports)
 		printGatePushStatus(out, reports)
 		return
 	}
@@ -308,6 +340,7 @@ func printGateRefusalsTable(out io.Writer, reports []gateRefusalsReport) {
 	}
 	fmt.Fprintf(out, "\n深度耗尽可以换一条链重来；预算是 per_issue 累计，不会自己归零。\n")
 	printPerRunBudgetStatus(out, reports)
+	printPeriodBudgetStatus(out, reports)
 	printGatePushStatus(out, reports)
 }
 
@@ -368,6 +401,94 @@ func printPerRunBudgetStatus(out io.Writer, reports []gateRefusalsReport) {
 	default:
 		fmt.Fprintf(out, "未设上限时**不熔断**，这是明示的而不是漏的；配上 %s 才生效。\n",
 			service.RunCostBudgetEnvVar)
+	}
+}
+
+// printPeriodBudgetStatus 打印四个周期维度的设防情况（#41）。
+//
+// 与 per_run 那块同样的道理：**没有任何拒绝记录时也要打印**。而且这一层比 per_run
+// 更需要它——四个维度各自独立，人很容易只配了其中一个就以为全都设防了。
+//
+// **窗口起止要打出来**，不能只打一个上限数字：只看见「$10/月」的人还是不知道「这个
+// 月」从哪一刻算起、在哪个时区切。周期边界是要给人看的，不是内部实现细节。
+func printPeriodBudgetStatus(out io.Writer, reports []gateRefusalsReport) {
+	var found *gateRefusalsPeriodBudget
+	for i := range reports {
+		if reports[i].PeriodBudget != nil {
+			found = reports[i].PeriodBudget
+			break
+		}
+	}
+	fmt.Fprintf(out, "\n周期成本上限（#41，per_agent / per_workspace）\n")
+	if found == nil {
+		fmt.Fprintf(out, "两个进程都没有报告这一层——这道闸门跑在派单收口上，确认服务端已带着本次改动重启。\n")
+		return
+	}
+	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "维度\t状态\t本周期从\t到")
+	for _, st := range found.Statuses {
+		state := "未设上限"
+		switch {
+		case st.ParseError != "":
+			state = "配错了（按未配置处理）"
+		case st.Configured:
+			state = fmt.Sprintf("$%.4f", st.BudgetUSD)
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
+			periodDimensionLabel(st.Key), state,
+			shortRFC3339(st.Window.Start), shortRFC3339(st.Window.End))
+	}
+	if err := tw.Flush(); err != nil {
+		fmt.Fprintf(os.Stderr, "gate-refusals: 渲染周期成本上限失败: %v\n", err)
+	}
+	// 收尾那句要分三种情况说，不能一律说「没设上限」。
+	//
+	// 「配错了」和「没设」在表格里是两行不同的字，但如果收尾一律说「四个维度都没设
+	// 上限」，配错的人读到的是「我没设，所以不熔断」——可他明明设了，只是没生效。这
+	// 比不显示更糟：他以为自己知道系统为什么没拦。
+	anyConfigured, anyBroken := false, false
+	for _, st := range found.Statuses {
+		if st.Configured {
+			anyConfigured = true
+		}
+		if st.ParseError != "" {
+			anyBroken = true
+		}
+	}
+	switch {
+	case anyBroken && anyConfigured:
+		fmt.Fprintf(out, "有维度配错了（见上表），已按未配置处理；其余维度按上表生效。\n")
+	case anyBroken:
+		fmt.Fprintf(out, "有维度配错了（见上表），已按未配置处理——**不是**「没设上限」，是你设的值读不懂，所以没生效。\n")
+	case anyConfigured:
+		fmt.Fprintf(out, "按 UTC 切日、按自然月切月；周期一到自动归零，不需要人放行。\n")
+	default:
+		fmt.Fprintf(out, "四个维度都没设上限，不熔断。按 UTC 切日、按自然月切月，周期到了自己归零。\n")
+	}
+}
+
+// shortRFC3339 把 ISO 时间戳压成「月-日 时:分」，够看清周期边界又不占宽度。
+func shortRFC3339(s string) string {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return s
+	}
+	return t.UTC().Format("01-02 15:04")
+}
+
+// periodDimensionLabel 把 `agent_daily` 翻成中文，与表格里其他列的中文保持一致。
+func periodDimensionLabel(key string) string {
+	switch key {
+	case "agent_daily":
+		return "单 Agent · 日"
+	case "agent_monthly":
+		return "单 Agent · 月"
+	case "workspace_daily":
+		return "整个工作区 · 日"
+	case "workspace_monthly":
+		return "整个工作区 · 月"
+	default:
+		return key
 	}
 }
 

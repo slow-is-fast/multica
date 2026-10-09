@@ -1300,6 +1300,14 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	if err := s.ruelGuardDelegationBudget(ctx, attrDelegatedFrom, issue.ID, issue.AssigneeID, "enqueue_issue_task"); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
+	// Ruel 新增：周期成本预算闸门（见 ruel_period_budget.go）。排在委派预算之后——那
+	// 个扫一条 Issue 的用量行，这个要扫一个 agent 与整个 workspace 的，窄的先判。
+	//
+	// 与上面两条不同，这条**不看有没有父 Run**：它是周期性总量，任何一单都算进去，
+	// 不管这一单是委派来的还是人派的。
+	if err := s.ruelGuardPeriodBudget(ctx, issue.AssigneeID, issue.WorkspaceID, issue.ID, "enqueue_issue_task"); err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 	createParams := db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              issue.AssigneeID,

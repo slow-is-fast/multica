@@ -36,6 +36,13 @@ const (
 	// 与深度那条分开记，因为**出路不同**：深度耗尽可以换一条链重来，预算是 per_issue
 	// 累计、不会归零，恢复了也会立刻再撞上——要人先解释那笔钱花在哪。
 	wakeupPausedDelegationBudget = "delegation_budget"
+	// wakeupPausedPeriodBudget: 周期性成本预算耗尽（#41，见 ruel_period_budget.go）。
+	//
+	// 与上面两条是第三种形状：深度换条链归零、per_issue 永不归零、**这个按日历周期
+	// 归零**。所以这里用 pause 收尾是**有意的保守**——它本可以等到下个周期自己恢复，
+	// 但一个被预算挡住的 wakeup 如果继续按计划触发，每次都会撞墙、每次都记一条回执，
+	// 通知自己变成噪音。暂停 + 说明原因，人来确认要不要调额度。
+	wakeupPausedPeriodBudget = "periodic_budget"
 	wakeupTimeoutEventType   = "wakeup.timeout"
 	wakeupManualEventType    = "wakeup.manual"
 	wakeupConditionEventType = "condition.met"

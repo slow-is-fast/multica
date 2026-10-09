@@ -1089,6 +1089,22 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 		}
 		return commit()
 	}
+	// Ruel 新增：周期成本预算闸门（#41）。同样用 pause 收尾，理由与委派预算那条不同——
+	// 这个**会**自己归零，但一个被预算挡住的 wakeup 若继续按计划触发，每次都会撞墙、
+	// 每次都记一条回执，通知自己变成噪音。所以暂停并说明原因，让人决定是调额度还是
+	// 等下个周期。
+	if err := s.Tasks.ruelGuardPeriodBudget(ctx, w.AgentID, issue.WorkspaceID, issue.ID, "issue_wakeup"); err != nil {
+		if err = q.PauseIssueWakeup(ctx, db.PauseIssueWakeupParams{ID: w.ID, PausedReason: pgtype.Text{String: wakeupPausedPeriodBudget, Valid: true}, BlockRuns: true}); err != nil {
+			return err
+		}
+		if err = q.DiscardWakeupReceipts(ctx, w.ID); err != nil {
+			return err
+		}
+		if err = note(wakeupActivityPaused, map[string]any{"reason": wakeupPausedPeriodBudget, "error": err.Error()}); err != nil {
+			return err
+		}
+		return commit()
+	}
 	noteText, evidence := mergeWakeupEvidence(w, task, receipts)
 	if taskExists {
 		task, err = q.ReplaceWakeupEvidence(ctx, db.ReplaceWakeupEvidenceParams{ID: task.ID, HandoffNote: pgtype.Text{String: noteText, Valid: true}, WakeupEvidence: evidence})

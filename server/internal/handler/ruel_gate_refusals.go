@@ -32,5 +32,10 @@ func (h *Handler) GetGateRefusals(w http.ResponseWriter, r *http.Request) {
 		// 未配置必须能被看出来：一个没设上限的系统，如果界面上什么都不显示，和一个
 		// 设了很大上限的系统长得一模一样。6.8 第 3 条要的「不允许静默」包括这一条。
 		"per_run_budget": service.RuelRunCostBudgetStatusFromEnv(),
+		// #41：四个周期维度（agent / workspace × 日 / 月）的设防情况。
+		//
+		// 连窗口边界一起给出去，是因为「周期」这件事本身要能被人看见：只显示一个上限
+		// 数字，人还是不知道「今天」到底算到几点、这个月从哪一刻开始。
+		"period_budget": service.PeriodBudgetStatusFromEnv(time.Now()),
 	})
 }

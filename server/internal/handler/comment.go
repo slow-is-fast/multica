@@ -2352,6 +2352,11 @@ func commentEnqueueFailureReason(err error) DispatchReasonCode {
 	if errors.Is(err, service.ErrDelegationBudgetExceeded) {
 		return ReasonDelegationBudgetExceeded
 	}
+	// 周期预算闸门（#41）同样是 service 层的收口，拒绝同样要翻译成 reason code。四个
+	// 维度共用这一个 code，具体是哪个维度在错误文本与回执的 dimension 后缀里。
+	if errors.Is(err, service.ErrPeriodBudgetExceeded) {
+		return ReasonPeriodBudgetExceeded
+	}
 	return ReasonInternalError
 }
 
