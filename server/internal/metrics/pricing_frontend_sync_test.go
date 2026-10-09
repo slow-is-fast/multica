@@ -176,33 +176,72 @@ func TestFrontendPricingMatchesServerOnSharedRows(t *testing.T) {
 	}
 }
 
-// TestFrontendPricingCoverageGapIsOnlyTheKnownSet freezes the set of SKUs only
-// one side prices. Both directions are real gaps: a frontend-only row means the
-// UI shows a cost the server calls unpriced (so it never reaches a budget
-// gate), and a server-only row means the gate bills a model the UI shows as $0.
-// Neither is fixed here — closing them needs a provider and an alias rule per
+// TestFrontendPricingCoverageGapIsOnlyTheKnownSet freezes the set of models
+// only one side can price. Both directions are real gaps: a frontend-only model
+// means the UI shows a cost the server calls unpriced (so it never reaches a
+// budget gate), and a server-only row means the gate bills a model the UI shows
+// as $0. Neither is closed here — that needs a provider and an alias rule per
 // row, which is a data job (ruel#44). What this test buys is that the gap
-// cannot GROW unnoticed: adding a row to either table without porting it turns
+// cannot GROW unnoticed: adding a row to either side without porting it turns
 // this red.
+//
+// ## Why "frontend-only" measures RESOLVABILITY, not table keys
+//
+// The first version of this guard asked whether any server row's NAME lined up
+// with the frontend key. That reported 36 gaps, but 3 of them were artifacts:
+// `deepseek-chat`, `deepseek-reasoner` and `kimi/k3` are the frontend's own
+// spellings of SKUs the server already prices through its alias rules — and at
+// identical rates. The server was right; the guard's key matching was wrong.
+//
+// What matters is not whether the two tables contain a row with a matching
+// name, but whether both sides arrive at the same dollars for the same model
+// id. So this asks PriceForModelAlias directly: can the server price this id,
+// and does it price it the same way? A row the server reaches through an alias
+// is not a gap — duplicating it as its own row would create two rows for one
+// SKU, which is its own drift risk.
 func TestFrontendPricingCoverageGapIsOnlyTheKnownSet(t *testing.T) {
 	path := pricingFrontendPath(t)
 	fe := parseFrontendPricing(t, path)
 
-	matched := map[string]bool{}
-	for _, sp := range modelPrices {
-		for _, c := range frontendKeyCandidates(sp) {
-			matched[c] = true
-		}
-	}
-
-	var onlyFrontend []string
+	feKeys := make([]string, 0, len(fe))
 	for k := range fe {
-		if !matched[k] {
-			onlyFrontend = append(onlyFrontend, k)
-		}
+		feKeys = append(feKeys, k)
 	}
-	sort.Strings(onlyFrontend)
+	sort.Strings(feKeys)
 
+	var onlyFrontend, conflicts []string
+	aligned := 0
+	for _, k := range feKeys {
+		fp := fe[k]
+		sp, ok := PriceForModelAlias(k)
+		if !ok {
+			onlyFrontend = append(onlyFrontend, k)
+			continue
+		}
+		if sp.InputPerM == fp.input && sp.OutputPerM == fp.output &&
+			sp.CacheReadPerM == fp.cacheRead && sp.CacheWritePerM == fp.cacheWrite {
+			aligned++
+			continue
+		}
+		// Resolvable but at different rates is a bug, not a gap: the shared-row
+		// guard above never sees these, because it only compares rows whose
+		// names line up. Freezing them into a "known gap" list would hide a
+		// real disagreement behind a list that is supposed to shrink.
+		conflicts = append(conflicts, fmt.Sprintf("  %s -> %s:%s\n    frontend i=%.4f o=%.4f cr=%.4f cw=%.4f\n    server   i=%.4f o=%.4f cr=%.4f cw=%.4f",
+			k, sp.Provider, sp.Model,
+			fp.input, fp.output, fp.cacheRead, fp.cacheWrite,
+			sp.InputPerM, sp.OutputPerM, sp.CacheReadPerM, sp.CacheWritePerM))
+	}
+	if len(conflicts) > 0 {
+		sort.Strings(conflicts)
+		t.Fatalf("%d frontend key(s) resolve on the server to DIFFERENT rates:\n%s\n\nThese are disagreements, not coverage gaps — fix the rates, not the frozen list.", len(conflicts), strings.Join(conflicts, "\n"))
+	}
+	if aligned < 20 {
+		t.Fatalf("only %d frontend keys resolve on the server — the alias rules or the frontend table parser broke; this guard is no longer measuring what it says", aligned)
+	}
+
+	// Server-only stays key-based: the frontend looks a model up BY KEY, so a
+	// server row the frontend has no key for genuinely cannot be priced there.
 	var onlyServer []string
 	for _, sp := range modelPrices {
 		found := false
@@ -222,19 +261,20 @@ func TestFrontendPricingCoverageGapIsOnlyTheKnownSet(t *testing.T) {
 	assertSet(t, "server-only", onlyServer, knownServerOnly)
 }
 
-// Frozen as of ruel#39. Shrinking either list is a win and just needs the
-// constant updated; growing it is exactly what this test exists to stop.
+// Frozen as of ruel#44 (was 36/7 under the key-based guard; the three aliases
+// the server already covered dropped out when the guard started measuring
+// resolvability). Shrinking either list is a win and just needs the constant
+// updated; growing it is exactly what this test exists to stop.
 var knownFrontendOnly = []string{
 	"claude-haiku-3-5", "claude-opus-4", "claude-opus-4-1", "claude-sonnet-4",
 	"cursor", "cursor/auto", "cursor/composer-1", "cursor/composer-1.5",
 	"cursor/composer-2", "cursor/composer-2-fast", "cursor/composer-2.5",
 	"cursor/composer-2.5-fast",
-	"deepseek-chat", "deepseek-reasoner",
 	"glm-4.5", "glm-4.5-air", "glm-4.5-airx", "glm-4.5-flash", "glm-4.5-x",
 	"glm-4.6", "glm-4.7", "glm-4.7-flash", "glm-4.7-flashx",
 	"glm-5-turbo", "glm-5.1",
 	"gpt-4o", "gpt-4o-mini", "gpt-5", "gpt-5-codex", "gpt-5-mini", "gpt-5-nano",
-	"kimi-k2.6", "kimi/k3", "o3", "o3-mini", "o4-mini",
+	"kimi-k2.6", "o3", "o3-mini", "o4-mini",
 }
 
 var knownServerOnly = []string{
