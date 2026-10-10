@@ -2177,6 +2177,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// 改了什么」，多轮 Run 的变更要能一起看到，只看最后一轮会漏。
 			r.Get("/api/issues/{id}/artifacts", h.ListRuelIssueArtifacts)
 
+			// Ruel 新增：项目知识候选的审批链路（#48）。PRD 第 5 章要求知识必须
+			// 经人批准才进库，所以三个路由都限定 human actor——机器身份在这条
+			// 链路上没有任何它能做的动作（批准与拒绝都是人的决定）。
+			r.Route("/api/ruel/knowledge", func(r chi.Router) {
+				r.Use(handler.RequireHumanActor)
+				r.Get("/pending", h.ListRuelPendingKnowledge)
+				// 批准与拒绝分成两个路由：这样「decision 传了个没见过的词」这
+				// 一整类输入错误不存在，且拒绝的「必须写理由」是一条独立规则。
+				r.Post("/{id}/approve", h.ApproveRuelKnowledge)
+				r.Post("/{id}/reject", h.RejectRuelKnowledge)
+			})
+
 			// Autopilots
 			r.Route("/api/autopilots", func(r chi.Router) {
 				r.Get("/", h.ListAutopilots)

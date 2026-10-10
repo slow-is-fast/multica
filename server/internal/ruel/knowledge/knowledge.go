@@ -61,6 +61,15 @@ func (e ErrNotPending) Error() string {
 // 前端只能显示空白，缺陷就又被藏回去了。
 var ErrUnknownStatus = errors.New("knowledge: 未知的状态取值")
 
+// ErrNotFound 表示这条记录在本 workspace 下不存在。
+//
+// 「不存在」与「属于另一个 workspace」刻意用同一个错误：两者对外都只能说「这里
+// 没有这条」，区分开就变成了一个探测别的项目有哪些条目的接口。
+//
+// 单独定义成哨兵而不是让调用方去比对错误文本：HTTP 层要按它回 404，按文本匹配
+// 的话，改一句提示语就会让 404 静默退化成 500。
+var ErrNotFound = errors.New("knowledge: 本 workspace 下没有这条记录")
+
 // ValidStatus 判断一个字符串是不是已知的审阅状态。
 func ValidStatus(status string) bool {
 	switch strings.TrimSpace(status) {
@@ -271,7 +280,10 @@ SELECT status FROM ruel_project_knowledge
 	if errors.Is(err, pgx.ErrNoRows) {
 		// 不存在，或者属于别的 workspace。两者对外都是「这里没有这条」——
 		// 刻意不区分，否则会变成一个探测别的 workspace 有没有某条记录的接口。
-		return fmt.Errorf("knowledge: 本 workspace 下没有条目 %v", id)
+		//
+		// 用 %w 包住哨兵：调用方（handler）靠 errors.Is 决定回 404 还是 409，
+		// 而不是靠比对这句提示语的文本。
+		return fmt.Errorf("%w: %v", ErrNotFound, id)
 	}
 	if err != nil {
 		return err

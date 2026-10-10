@@ -440,6 +440,71 @@ func TestCreateRejectsUnknownWorkspace(t *testing.T) {
 	}
 }
 
+// TestReviewMissClassifiesNotFound 守「没找到」是一个可识别的哨兵值，且两种 miss
+// 给的是同一个。
+//
+// HTTP 层靠 errors.Is(err, ErrNotFound) 决定回 404 还是 500。若让它去比对提示语的
+// 文本，改一句话就会让 404 静默退化成 500——一个拼错的 id 变成服务端故障。
+//
+// 两种 miss 必须合并：「本 workspace 里没有这个 id」与「条目存在但属于别的
+// workspace」。区分开就等于给了一个探测别的项目有哪些条目的接口，而 workspace 是
+// 硬边界（PRD 6.7 里程碑 3 的退出条件）。
+func TestReviewMissClassifiesNotFound(t *testing.T) {
+	pool := testPool(t)
+	store := NewStore(pool)
+	wsA := newTestWorkspace(t, pool)
+	wsB := newTestWorkspace(t, pool)
+	ctx := context.Background()
+
+	// ① 这个 id 在 A 里没有。
+	_, err := store.Review(ctx, validUUID(0x5a), wsA, StatusApproved, "", ReviewerMember, validUUID(9))
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("不存在的 id: err = %v，应当是 ErrNotFound", err)
+	}
+
+	// ② 条目真实存在，但属于 B。
+	entry, err := store.Create(ctx, Entry{WorkspaceID: wsB, Statement: "B 的候选"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	_, err = store.Review(ctx, entry.ID, wsA, StatusApproved, "", ReviewerMember, validUUID(9))
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("跨 workspace 的 id: err = %v，应当与①同一个 ErrNotFound", err)
+	}
+	// 两件事都不能被误判成「已经审过了」——那会让界面显示 409，把一次越权（或一次
+	// 拼错）说成「这条已经被处理过」。
+	var notPending ErrNotPending
+	if errors.As(err, &notPending) {
+		t.Error("跨 workspace 的审批被误判成了 ErrNotPending")
+	}
+	// 同理也不能被误判成「参数不对」。
+	if errors.Is(err, ErrUnknownStatus) {
+		t.Error("跨 workspace 的审批被误判成了 ErrUnknownStatus")
+	}
+
+	// 那条件目本身必须原封不动。
+	still, err := store.ListForWorkspace(ctx, wsB, StatusPending)
+	if err != nil {
+		t.Fatalf("读 B: %v", err)
+	}
+	if len(still) != 1 || still[0].Status != StatusPending {
+		t.Errorf("B 的条目被动了：%v", statements(still))
+	}
+}
+
+// TestArchiveMissClassifiesNotFound 与上一条同源（explainMiss），只钉 Archive 这一支
+// 也没漏掉哨兵——它同样被 HTTP 层按 404 处理。
+func TestArchiveMissClassifiesNotFound(t *testing.T) {
+	pool := testPool(t)
+	store := NewStore(pool)
+	ws := newTestWorkspace(t, pool)
+
+	_, err := store.Archive(context.Background(), validUUID(0x5b), ws, "", ReviewerMember, validUUID(9))
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("归档一个不存在的 id: err = %v，应当是 ErrNotFound", err)
+	}
+}
+
 func statements(entries []Entry) []string {
 	out := make([]string, 0, len(entries))
 	for _, e := range entries {
