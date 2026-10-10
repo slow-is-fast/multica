@@ -25,5 +25,32 @@
     "built_on": "基于 Multica 构建",
     "license": "许可证",
     "notice": "声明"
+  },
+  "knowledge": {
+    "title": "项目知识",
+    "description": "Agent 总结出的候选先落在这里，经人批准才会进入后续 Run 的上下文。",
+    "queue_count_other": "待审 {{count}} 条",
+    "loading": "正在读取待审队列…",
+    "empty_title": "没有待审的知识候选",
+    "empty_description": "已批准的知识会进入后续 Run 的上下文；被拒绝的候选连同理由留在库里，用来避免同一条被反复提出。",
+    "load_failed_title": "待审队列没能读到",
+    "load_failed_description": "读不到不等于没有待审候选——别把这一屏当成「都审完了」。",
+    "retry": "重试",
+    "approve": "批准",
+    "reject": "拒绝",
+    "reject_reason_label": "拒绝理由（必填）",
+    "reject_reason_placeholder": "写清为什么不要这条，下一个人和下一次提案都会看到。",
+    "reject_confirm": "确认拒绝",
+    "reject_cancel": "取消",
+    "approved_toast": "已批准，会进入后续 Run 的上下文",
+    "rejected_toast": "已拒绝，理由已记录",
+    "source_issue": "来源：对应的任务",
+    "source_comment": "来源：一条评论",
+    "source_task": "来源：一次 Run",
+    "source_unknown": "来源不详",
+    "failed_already_reviewed": "这条已经被处理过了，队列已刷新",
+    "failed_not_found": "这条候选已经不在了，队列已刷新",
+    "failed_note_required": "拒绝必须写明理由",
+    "failed_generic": "操作没能完成，请重试"
   }
 }

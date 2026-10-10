@@ -5,6 +5,7 @@ import {
   AlarmClock,
   Bell,
   Blocks,
+  BookOpen,
   CircleDot,
   CreditCard,
   FolderGit2,
@@ -56,6 +57,7 @@ import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 import { PluginsTab } from "./plugins-tab";
 import { McpTab } from "./mcp-tab";
 import { BillingTab } from "./billing-tab";
+import { KnowledgeApprovalTab } from "../../ruel/knowledge-approval";
 import { SETTINGS_ANCHOR_ATTR } from "./settings-layout";
 import { searchSettings } from "./settings-search";
 import { HighlightText } from "../../search/highlight-text";
@@ -199,6 +201,17 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
                   ),
                 ]
               : []),
+            // Ruel 新增：项目知识候选的待审队列（#48）。放在工作区这一组里而不是
+            // 议题那一组：知识是工作区的资源，它被注入的是**后续所有** Run 的上下文，
+            // 不挂在某一条议题下。不设 adminOnly——审批是成员的日常动作，服务端也只
+            // 要求 workspace 成员。
+            entry(
+              "knowledge",
+              t(($) => $.page.tabs.knowledge),
+              BookOpen,
+              <KnowledgeApprovalTab />,
+              { wide: true },
+            ),
           ],
         },
         {

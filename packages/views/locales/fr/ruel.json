@@ -26,5 +26,33 @@
     "built_on": "Built on Multica",
     "license": "License",
     "notice": "Notices"
+  },
+  "knowledge": {
+    "title": "Connaissances du projet",
+    "description": "Les candidats résumés par les agents attendent ici. Seules les connaissances approuvées par une personne entrent dans le contexte des exécutions suivantes.",
+    "queue_count_one": "{{count}} en attente",
+    "queue_count_other": "{{count}} en attente",
+    "loading": "Lecture de la file d'attente…",
+    "empty_title": "Aucun candidat en attente de validation",
+    "empty_description": "Les connaissances approuvées entrent dans le contexte des exécutions suivantes. Un candidat rejeté garde sa raison en base, pour qu'il ne soit pas proposé de nouveau.",
+    "load_failed_title": "La file d'attente n'a pas pu être lue",
+    "load_failed_description": "Une lecture échouée n'est pas une file vide — ne prenez pas cet écran pour « tout est validé ».",
+    "retry": "Réessayer",
+    "approve": "Approuver",
+    "reject": "Rejeter",
+    "reject_reason_label": "Raison du rejet (obligatoire)",
+    "reject_reason_placeholder": "Dites pourquoi ce candidat est écarté — la personne suivante et la prochaine proposition le liront.",
+    "reject_confirm": "Confirmer le rejet",
+    "reject_cancel": "Annuler",
+    "approved_toast": "Approuvé — entrera dans le contexte des exécutions suivantes",
+    "rejected_toast": "Rejeté — la raison est enregistrée",
+    "source_issue": "Depuis la tâche d'origine",
+    "source_comment": "Depuis un commentaire",
+    "source_task": "Depuis une exécution",
+    "source_unknown": "Source inconnue",
+    "failed_already_reviewed": "Quelqu'un a déjà traité ce candidat. La file a été actualisée.",
+    "failed_not_found": "Ce candidat n'existe plus. La file a été actualisée.",
+    "failed_note_required": "Un rejet doit porter une raison",
+    "failed_generic": "L'opération n'a pas abouti. Réessayez."
   }
 }

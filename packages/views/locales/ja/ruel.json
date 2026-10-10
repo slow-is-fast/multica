@@ -25,5 +25,32 @@
     "built_on": "Built on Multica",
     "license": "License",
     "notice": "Notices"
+  },
+  "knowledge": {
+    "title": "プロジェクト知識",
+    "description": "エージェントがまとめた候補はここに並びます。人が承認して初めて、以降の Run のコンテキストに入ります。",
+    "queue_count_other": "承認待ち {{count}} 件",
+    "loading": "承認待ちキューを読み込んでいます…",
+    "empty_title": "承認待ちの候補はありません",
+    "empty_description": "承認された知識は以降の Run のコンテキストに入ります。却下した候補は理由ごとデータベースに残り、同じ候補が再び提案されないようにします。",
+    "load_failed_title": "承認待ちキューを読み込めませんでした",
+    "load_failed_description": "読み込めなかったことは「承認待ちが無い」ことではありません。この画面を「すべて確認済み」と受け取らないでください。",
+    "retry": "再試行",
+    "approve": "承認",
+    "reject": "却下",
+    "reject_reason_label": "却下の理由（必須）",
+    "reject_reason_placeholder": "なぜ不要なのかを書いてください。次の人と次の提案がこれを読みます。",
+    "reject_confirm": "却下する",
+    "reject_cancel": "キャンセル",
+    "approved_toast": "承認しました。以降の Run のコンテキストに入ります",
+    "rejected_toast": "却下しました。理由は記録済みです",
+    "source_issue": "出所：元のタスク",
+    "source_comment": "出所：あるコメント",
+    "source_task": "出所：ある実行",
+    "source_unknown": "出所不明",
+    "failed_already_reviewed": "この候補はすでに処理されています。キューを更新しました",
+    "failed_not_found": "この候補はもうありません。キューを更新しました",
+    "failed_note_required": "却下には理由が必要です",
+    "failed_generic": "操作が完了しませんでした。もう一度お試しください"
   }
 }

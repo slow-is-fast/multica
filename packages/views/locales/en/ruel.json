@@ -26,5 +26,33 @@
     "built_on": "Built on Multica",
     "license": "License",
     "notice": "Notices"
+  },
+  "knowledge": {
+    "title": "Project knowledge",
+    "description": "Candidates summarized by agents queue up here until a person approves them. Only approved knowledge enters the context of later runs.",
+    "queue_count_one": "{{count}} pending",
+    "queue_count_other": "{{count}} pending",
+    "loading": "Reading the pending queue…",
+    "empty_title": "Nothing is waiting for review",
+    "empty_description": "Approved knowledge enters the context of later runs. A rejected candidate keeps its reason on record, so the same one is not proposed again.",
+    "load_failed_title": "The pending queue could not be read",
+    "load_failed_description": "A failed read is not an empty queue — do not take this screen as “everything is reviewed”.",
+    "retry": "Retry",
+    "approve": "Approve",
+    "reject": "Reject",
+    "reject_reason_label": "Reason for rejecting (required)",
+    "reject_reason_placeholder": "Say why this one is out — both the next person and the next proposal read it.",
+    "reject_confirm": "Reject",
+    "reject_cancel": "Cancel",
+    "approved_toast": "Approved — it will enter the context of later runs",
+    "rejected_toast": "Rejected — the reason is on record",
+    "source_issue": "From the source issue",
+    "source_comment": "From a comment",
+    "source_task": "From a run",
+    "source_unknown": "Source unknown",
+    "failed_already_reviewed": "Someone already reviewed this one. The queue has been refreshed.",
+    "failed_not_found": "This candidate is gone. The queue has been refreshed.",
+    "failed_note_required": "A rejection must carry a reason",
+    "failed_generic": "That did not go through. Please try again."
   }
 }

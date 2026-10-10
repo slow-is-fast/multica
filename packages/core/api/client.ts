@@ -6,6 +6,10 @@ import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSche
 // server/internal/handler/ruel_artifacts.go，类型与降级策略见 ../ruel/artifacts。
 import { RuelArtifactListSchema } from "../ruel/artifacts";
 import type { RuelArtifact } from "../ruel/artifacts";
+// Ruel 新增：项目知识候选的审批（#48）。服务端接口见
+// server/internal/handler/ruel_knowledge.go。
+import { RuelKnowledgeEntrySchema, RuelKnowledgeListSchema } from "../ruel/knowledge";
+import type { RuelKnowledgeEntry } from "../ruel/knowledge";
 import type { InboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import { configStore } from "../config";
@@ -2826,6 +2830,62 @@ export class ApiClient {
     return parseWithFallback<RuelArtifact[]>(raw, RuelArtifactListSchema, [], {
       endpoint: "GET /api/issues/:id/artifacts",
     });
+  }
+
+  /**
+   * Ruel 新增：本 workspace 的项目知识待审队列（#48）。
+   *
+   * 待审计数就是数组长度，服务端不另报一个计数——队列不翻页，多一个数只会多一种
+   * 能和数组长度对不上的地方。
+   *
+   * 解析失败退化成空数组：知识是附加上下文，一次契约漂移不该让审批页整块消失。
+   * 代价是「队列为空」与「响应解析不了」在界面上长得一样——所以这个端点的失败
+   * 必须是网络层/状态码层的失败（那时 useQuery 的 error 分支会说话），而不是字段
+   * 层的。字段层的漂移由 schema 的逐字段默认值兜住，兜不住才轮到空数组。
+   */
+  async listRuelPendingKnowledge(): Promise<RuelKnowledgeEntry[]> {
+    const raw = await this.fetch<unknown>("/api/ruel/knowledge/pending");
+    return parseWithFallback<RuelKnowledgeEntry[]>(raw, RuelKnowledgeListSchema, [], {
+      endpoint: "GET /api/ruel/knowledge/pending",
+    });
+  }
+
+  /**
+   * Ruel 新增：批准一条待审候选（#48）。不带理由。
+   *
+   * 返回解析后的条目，解析不出来就是 undefined——调用方据此退回「重新拉一次队列」
+   * 的路径，而不是拿一条空记录去更新界面（那会在界面上留下一行没有结论的候选）。
+   */
+  async approveRuelKnowledge(id: string): Promise<RuelKnowledgeEntry | undefined> {
+    return this.reviewRuelKnowledge(id, "approve", "");
+  }
+
+  /** Ruel 新增：拒绝一条待审候选（#48）。理由必填，服务端也会再挡一道。 */
+  async rejectRuelKnowledge(id: string, note: string): Promise<RuelKnowledgeEntry | undefined> {
+    return this.reviewRuelKnowledge(id, "reject", note);
+  }
+
+  /**
+   * 批准与拒绝的共同实现。
+   *
+   * 服务端刻意分成两个路由（这样「decision 传了个没见过的词」这一整类输入错误
+   * 不存在），客户端这边合成一个私有方法：两条路径的差别只有路径名与理由。
+   */
+  private async reviewRuelKnowledge(
+    id: string,
+    action: "approve" | "reject",
+    note: string,
+  ): Promise<RuelKnowledgeEntry | undefined> {
+    const raw = await this.fetch<unknown>(
+      `/api/ruel/knowledge/${encodeURIComponent(id)}/${action}`,
+      { method: "POST", body: JSON.stringify({ note }) },
+    );
+    return parseWithFallback<RuelKnowledgeEntry | undefined>(
+      raw,
+      RuelKnowledgeEntrySchema,
+      undefined,
+      { endpoint: `POST /api/ruel/knowledge/:id/${action}` },
+    );
   }
 
   async retryTaskSupplement(issueId: string, taskId: string, commentId: string): Promise<void> {
