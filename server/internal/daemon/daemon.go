@@ -7829,6 +7829,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectTitle:                     task.ProjectTitle,
 		ProjectDescription:               task.ProjectDescription,
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
+		ProjectKnowledge:                 convertProjectKnowledgeForEnv(task.ProjectKnowledge),
+		ProjectKnowledgeOmitted:          task.ProjectKnowledgeOmitted,
 		ChatSessionID:                    task.ChatSessionID,
 		ChatChannelType:                  task.ChatChannelType,
 		ChatChannelDeliversFiles:         task.ChatChannelDeliversFiles,
@@ -10084,6 +10086,21 @@ func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.Pr
 			ResourceRef:  r.ResourceRef,
 			Label:        r.Label,
 		}
+	}
+	return result
+}
+
+// convertProjectKnowledgeForEnv carries the claim payload's approved
+// project-knowledge entries into the brief context. The daemon passes through
+// exactly what the server sent — the server already enforced the workspace
+// boundary and the cap, so no filtering happens here.
+func convertProjectKnowledgeForEnv(entries []ProjectKnowledgeData) []execenv.ProjectKnowledgeForEnv {
+	if len(entries) == 0 {
+		return nil
+	}
+	result := make([]execenv.ProjectKnowledgeForEnv, len(entries))
+	for i, e := range entries {
+		result[i] = execenv.ProjectKnowledgeForEnv{ID: e.ID, Statement: e.Statement, Rationale: e.Rationale}
 	}
 	return result
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/ruel/knowledge"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -1955,6 +1956,41 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 	writeMeasuredJSON(w, http.StatusOK, response)
 }
 
+// loadApprovedProjectKnowledge fetches this workspace's approved project-knowledge
+// entries for brief injection. The store's ListApprovedForWorkspace already
+// enforces the workspace boundary — it takes a workspaceID and returns only that
+// workspace's approved rows — so cross-workspace leakage is structurally
+// impossible here, not a matter of the caller remembering to filter.
+//
+// A cap guards against a runaway table crowding out the actual task instruction.
+// Overflow is returned separately (omitted) so the caller can disclose the
+// truncation in the brief rather than silently dropping entries (PRD chapter 5
+// budget layer: never silently truncate a new user instruction).
+func (h *Handler) loadApprovedProjectKnowledge(ctx context.Context, wsID pgtype.UUID) ([]ProjectKnowledgeData, int) {
+	approved, err := knowledge.NewStore(h.DB).ListApprovedForWorkspace(ctx, wsID)
+	if err != nil {
+		slog.Warn("task claim: failed to load approved project knowledge for brief injection",
+			"workspace_id", uuidToString(wsID),
+			"error", err,
+		)
+		return nil, 0
+	}
+	entries := make([]ProjectKnowledgeData, 0, len(approved))
+	omitted := 0
+	for _, e := range approved {
+		if len(entries) == projectKnowledgeCap {
+			omitted++
+			continue
+		}
+		entries = append(entries, ProjectKnowledgeData{
+			ID:        uuidToString(e.ID),
+			Statement: e.Statement,
+			Rationale: e.Rationale,
+		})
+	}
+	return entries, omitted
+}
+
 func claimPollHintDelay(now, fireAt time.Time) time.Duration {
 	delay := fireAt.Sub(now)
 	if delay < claimPollHintMinDelay {
@@ -3543,6 +3579,15 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			"error", err,
 		)
 	}
+
+	// Approved project knowledge (PRD chapter 5 cross-agent knowledge): ship it
+	// to the daemon so the brief can surface human-approved decisions across
+	// runs. The store filters strictly by workspace, so wsB's entries can never
+	// reach wsA's run. The cap is applied here and its overflow reported via
+	// ProjectKnowledgeOmitted — the brief then discloses the truncation instead
+	// of silently dropping entries (PRD chapter 5: never silently truncate a new
+	// user instruction).
+	resp.ProjectKnowledge, resp.ProjectKnowledgeOmitted = h.loadApprovedProjectKnowledge(r.Context(), parseUUID(resp.WorkspaceID))
 
 	// Workspace status catalog (MUL-6460): active CUSTOM statuses only, so the
 	// daemon can render them into the brief's status-command line. Read on every

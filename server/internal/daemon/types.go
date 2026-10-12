@@ -65,6 +65,17 @@ type IssueStatusData struct {
 	Description string `json:"description,omitempty"`
 }
 
+// ProjectKnowledgeData mirrors handler.ProjectKnowledgeData — one approved
+// project-knowledge entry as delivered to the daemon. Mirror field:
+// internal/handler/agent.go ProjectKnowledgeData, same JSON names. The daemon
+// decodes the claim JSON into Task directly, so the JSON tags must match the
+// server's wire shape exactly.
+type ProjectKnowledgeData struct {
+	ID        string `json:"id"`
+	Statement string `json:"statement"`
+	Rationale string `json:"rationale,omitempty"`
+}
+
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
@@ -106,6 +117,12 @@ type Task struct {
 	ProjectTitle                  string                 `json:"project_title,omitempty"`                    // human-readable project title for context injection
 	ProjectDescription            string                 `json:"project_description,omitempty"`              // durable project-level context injected into the brief
 	ProjectResources              []ProjectResourceData  `json:"project_resources,omitempty"`                // project-scoped resources to expose to the agent
+	// ProjectKnowledge mirrors the claim payload's approved project-knowledge
+	// (PRD chapter 5 cross-agent knowledge), already workspace-filtered and capped
+	// by the server. Rendered into the brief so a human-approved decision survives
+	// across runs. ProjectKnowledgeOmitted is the server cap's overflow count.
+	ProjectKnowledge       []ProjectKnowledgeData `json:"project_knowledge,omitempty"`
+	ProjectKnowledgeOmitted int                    `json:"project_knowledge_omitted,omitempty"`
 	IsLeaderTask                  bool                   `json:"is_leader_task,omitempty"`                   // true when executing in the squad-leader coordinator role
 	LeaderRoleResolved            bool                   `json:"leader_role_resolved,omitempty"`             // server capability: IsLeaderTask/SquadID authoritatively answer "is this a leader run". Absent on servers predating it — those before #4951 never sent is_leader_task at all, later ones send it without this guarantee — so taskIsSquadLeader falls back to the briefing marker for both (MUL-5811)
 	PriorSessionID                string                 `json:"prior_session_id,omitempty"`                 // Claude session ID from a previous task on this issue

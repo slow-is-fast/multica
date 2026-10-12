@@ -161,6 +161,14 @@ type TaskContextForEnv struct {
 	ProjectTitle                  string                  // human-readable project title
 	ProjectDescription            string                  // durable project-level context, rendered into the brief's Project Context section
 	ProjectResources              []ProjectResourceForEnv // resources attached to the project
+	// ProjectKnowledge is this workspace's approved project-knowledge (PRD
+	// chapter 5 cross-agent knowledge), injected so a human-approved decision
+	// survives across runs. Cross-workspace isolation is enforced by the server
+	// query, not here: the daemon renders exactly what it received.
+	// ProjectKnowledgeOmitted is the server cap's overflow count, surfaced so
+	// the brief can disclose truncation rather than silently drop entries.
+	ProjectKnowledge       []ProjectKnowledgeForEnv
+	ProjectKnowledgeOmitted int
 	ChatSessionID                 string                  // non-empty for chat tasks
 	// ChatChannelType is the IM platform behind a chat session ("slack",
 	// "feishu", "wecom"); empty for a web/mobile chat. It names the surface in
@@ -246,6 +254,16 @@ type IssueStatusForEnv struct {
 	Name        string
 	Category    string
 	Description string
+}
+
+// ProjectKnowledgeForEnv is one approved project-knowledge entry rendered into
+// the brief. Statement is the standing decision; Rationale is the human's
+// reasoning (may be empty). Both are human-approved guidance, not instructions
+// to obey blindly — see writeProjectKnowledge.
+type ProjectKnowledgeForEnv struct {
+	ID        string
+	Statement string
+	Rationale string
 }
 
 type SkillContextForEnv struct {

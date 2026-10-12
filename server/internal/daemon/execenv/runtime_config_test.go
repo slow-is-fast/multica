@@ -2406,8 +2406,128 @@ func TestEveryBriefThatTeachesJSONOutputAlsoWarnsAgainstMergingStderr(t *testing
 		default:
 			t.Errorf("%s brief repeats %q %d times; one rule, one place, or the next edit fixes only one of them", name, wantRule, got)
 		}
-		if !strings.Contains(brief, wantWhy) {
-			t.Errorf("%s brief states %q without %q; a rule with no reason is the first one dropped under pressure", name, wantRule, wantWhy)
+	if !strings.Contains(brief, wantWhy) {
+		t.Errorf("%s brief states %q without %q; a rule with no reason is the first one dropped under pressure", name, wantRule, wantWhy)
+	}
+}
+
+}
+
+// TestProjectKnowledgeRenderedAcrossTaskKinds verifies the Approved Project
+// Knowledge section appears for every task kind when entries are present, and
+// sits in the durable-context region after Available Commands.
+func TestProjectKnowledgeRenderedAcrossTaskKinds(t *testing.T) {
+	t.Parallel()
+	entries := []ProjectKnowledgeForEnv{
+		{ID: "e1", Statement: "Always run the test suite before pushing.", Rationale: "A bad push broke main once."},
+		{ID: "e2", Statement: "Prefer squash merges for feature branches."},
+	}
+	cases := []struct {
+		name string
+		ctx  TaskContextForEnv
+	}{
+		{name: "assignment-triggered", ctx: TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555", ProjectKnowledge: entries}},
+		{name: "comment-triggered", ctx: TaskContextForEnv{IssueID: "22222222-3333-4444-5555-666666666666", TriggerCommentID: "33333333-4444-5555-6666-777777777777", ProjectKnowledge: entries}},
+		{name: "chat", ctx: TaskContextForEnv{ChatSessionID: "chat-1", ProjectKnowledge: entries}},
+		{name: "quick-create", ctx: TaskContextForEnv{QuickCreatePrompt: "create me an issue", ProjectKnowledge: entries}},
+		{name: "autopilot run-only", ctx: TaskContextForEnv{AutopilotRunID: "run-1", ProjectKnowledge: entries}},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("claude", tc.ctx)
+			if !strings.Contains(out, "## Approved Project Knowledge") {
+				t.Fatalf("[%s] expected `## Approved Project Knowledge` heading", tc.name)
+			}
+			if !strings.Contains(out, entries[0].Statement) {
+				t.Errorf("[%s] brief missing first entry statement %q", tc.name, entries[0].Statement)
+			}
+			if !strings.Contains(out, entries[1].Statement) {
+				t.Errorf("[%s] brief missing second entry statement %q", tc.name, entries[1].Statement)
+			}
+			if !strings.Contains(out, entries[0].Rationale) {
+				t.Errorf("[%s] brief missing first entry rationale %q", tc.name, entries[0].Rationale)
+			}
+			ctxIdx := strings.Index(out, "## Approved Project Knowledge")
+			cmdsIdx := strings.Index(out, "## Available Commands")
+		if ctxIdx == -1 || cmdsIdx == -1 || ctxIdx <= cmdsIdx {
+			t.Errorf("[%s] `## Approved Project Knowledge` must appear after `## Available Commands` in the durable-context region (idx=%d, cmds=%d)", tc.name, ctxIdx, cmdsIdx)
 		}
+		})
+	}
+}
+
+// TestProjectKnowledgeHeadingSkippedWhenEmpty verifies that no section appears
+// when there are no approved entries — the common case (no approved knowledge)
+// must keep the brief byte-identical to before this feature.
+func TestProjectKnowledgeHeadingSkippedWhenEmpty(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		ctx  TaskContextForEnv
+	}{
+		{name: "nil slice", ctx: TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"}},
+		{name: "empty slice", ctx: TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555", ProjectKnowledge: []ProjectKnowledgeForEnv{}}},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("claude", tc.ctx)
+			if strings.Contains(out, "## Approved Project Knowledge") {
+				t.Fatalf("[%s] heading must be absent when there are no entries", tc.name)
+			}
+		})
+	}
+}
+
+// TestProjectKnowledgeDisclosesOmittedCount verifies the cap overflow is surfaced
+// explicitly rather than silently dropped (PRD chapter 5: never silently truncate
+// a new user instruction). The brief must name how many were omitted.
+func TestProjectKnowledgeDisclosesOmittedCount(t *testing.T) {
+	t.Parallel()
+	ctx := TaskContextForEnv{
+		IssueID:                 "11111111-2222-3333-4444-555555555555",
+		ProjectKnowledge:        []ProjectKnowledgeForEnv{{ID: "e1", Statement: "One visible entry."}},
+		ProjectKnowledgeOmitted: 7,
+	}
+	out := buildMetaSkillContent("claude", ctx)
+	if !strings.Contains(out, "## Approved Project Knowledge") {
+		t.Fatalf("expected heading")
+	}
+	if !strings.Contains(out, "7 more approved entries were omitted") {
+		t.Errorf("brief must disclose the omitted count; got:\n%s", out)
+	}
+	ctx0 := TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555", ProjectKnowledge: []ProjectKnowledgeForEnv{{ID: "e1", Statement: "One visible entry."}}}
+	out0 := buildMetaSkillContent("claude", ctx0)
+	if strings.Contains(out0, "were omitted") {
+		t.Errorf("zero omitted must not show a disclosure line; got:\n%s", out0)
+	}
+}
+
+// TestProjectKnowledgeScopePassthrough is the execenv-side half of the
+// cross-workspace scope guarantee. The daemon passes through exactly the entries
+// the server sent for THIS workspace; the brief must render those and nothing
+// else — an entry that was not in the slice (e.g. another workspace's) must not
+// leak in. The server-side half (the workspace-filtered query) is covered by
+// knowledge.TestListApprovedDoesNotCrossWorkspaces.
+func TestProjectKnowledgeScopePassthrough(t *testing.T) {
+	t.Parallel()
+	inScope := []ProjectKnowledgeForEnv{
+		{ID: "a1", Statement: "wsA decision alpha"},
+		{ID: "a2", Statement: "wsA decision beta"},
+	}
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:          "11111111-2222-3333-4444-555555555555",
+		ProjectKnowledge: inScope,
+	})
+	for _, e := range inScope {
+		if !strings.Contains(out, e.Statement) {
+			t.Errorf("in-scope entry %q missing from brief", e.Statement)
+		}
+	}
+	if strings.Contains(out, "wsB secret decision") {
+		t.Errorf("out-of-scope entry leaked into brief")
 	}
 }
