@@ -14,12 +14,16 @@
 // rollup to discover the change:
 //
 // `task_usage_hourly` is keyed on (bucket_hour, workspace, runtime, agent,
-// project, provider, model), and `task_usage` has NO update trigger — the
-// only trigger on it is `trg_tu_dirty_hourly`, BEFORE DELETE. The rollup's
-// window function discovers dirty keys from `updated_at`, so after a row is
-// re-labelled the only dirty key it can see is the NEW model. The old
-// 'unknown' bucket is therefore never recomputed and never deleted: it keeps
-// its old numbers while the new bucket adds the same usage again.
+// project, provider, model), and a row re-labelled on (provider, model) moves
+// to a different bucket KEY. The rollup's window function discovers dirty keys
+// from `updated_at`, so after a row is re-labelled the only dirty key it can
+// see is the NEW model. The old bucket is therefore never recomputed and never
+// deleted — it keeps its old numbers while the new bucket adds the same usage
+// again. This is now guarded structurally: `trg_tu_dirty_hourly` (migration
+// 102, ruel #53) fires BEFORE UPDATE OF provider, model and enqueues the old
+// key automatically, so a bare re-label can no longer double-count. The
+// explicit enqueue below is belt-and-braces, kept because this tool predates
+// the trigger.
 //
 // Measured on the 3 rows this tool exists for (see ruel #35): task_usage
 // held 15 codex rows / 220175 input tokens, but after a naive re-label the
@@ -390,11 +394,13 @@ func logPlan(rows []candidate) totals {
 
 // applyUpdates writes the resolved names back, batch by batch.
 //
-// Each batch is one transaction that does two things per row, and the second
-// is the one that is easy to forget: re-label the row AND enqueue the OLD
-// bucket key into task_usage_hourly_dirty. Without the enqueue the old
-// bucket is never recomputed and the usage is counted twice (see the header
-// comment).
+// Each batch is one transaction that re-labels the row AND enqueues the OLD
+// bucket key into task_usage_hourly_dirty. The enqueue is now redundant:
+// `trg_tu_dirty_hourly` (migration 102, ruel #53) already fires on the
+// UPDATE OF model and enqueues the old key automatically. It is kept as
+// belt-and-braces — and as the pre-trigger behaviour — so the tool still
+// produces correct totals even against a database whose 102 has not been
+// migrated forward.
 func applyUpdates(ctx context.Context, pool *pgxpool.Pool, cfg config, rows []candidate) (int, error) {
 	const relabel = `
 UPDATE task_usage

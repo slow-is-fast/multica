@@ -227,14 +227,24 @@ CREATE TRIGGER trg_issue_project_dirty_hourly
 BEFORE UPDATE OF project_id ON issue
 FOR EACH ROW EXECUTE FUNCTION enqueue_task_usage_hourly_dirty_for_issue_project();
 
--- Trigger 4: task_usage BEFORE DELETE — rare in practice (no direct
--- callers today) but keeps the rollup convergent if one is added.
--- INSERT/UPDATE are covered by the watermark window.
+-- Trigger 4: task_usage BEFORE DELETE, and BEFORE UPDATE OF provider, model.
+-- DELETE is rare in practice (no direct callers today) but keeps the rollup
+-- convergent if one is added. UPDATE OF provider/model is the re-attribution
+-- case (ruel #53): changing a row's (provider, model) moves it to a different
+-- rollup bucket KEY, and the watermark window only ever sees the NEW key — so
+-- the OLD bucket would keep its old totals while the new bucket adds the same
+-- usage again (double counting, ruel #35 / #53). This trigger enqueues the OLD
+-- key so the rollup's deleted_empty removes the stale bucket. Plain value
+-- updates (token counters) leave the bucket key untouched and still ride the
+-- watermark, so they need no special handling.
 CREATE OR REPLACE FUNCTION enqueue_task_usage_hourly_dirty_for_tu()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    -- OLD carries the pre-change bucket key for both DELETE and UPDATE OF
+    -- provider/model: enqueue it so the rollup recomputes — and, when the row
+    -- no longer contributes to it, deletes — the stale bucket.
     INSERT INTO task_usage_hourly_dirty (
         bucket_hour, workspace_id, runtime_id, agent_id,
         project_id, provider, model
@@ -254,12 +264,15 @@ BEGIN
        AND atq.runtime_id IS NOT NULL
     ON CONFLICT ON CONSTRAINT uq_task_usage_hourly_dirty_key DO UPDATE
         SET enqueued_at = GREATEST(task_usage_hourly_dirty.enqueued_at, EXCLUDED.enqueued_at);
-    RETURN OLD;
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
 END;
 $$;
 
 CREATE TRIGGER trg_tu_dirty_hourly
-BEFORE DELETE ON task_usage
+BEFORE UPDATE OF provider, model OR DELETE ON task_usage
 FOR EACH ROW EXECUTE FUNCTION enqueue_task_usage_hourly_dirty_for_tu();
 
 -- Window function. Mirrors 077/084's structure:

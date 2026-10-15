@@ -17,18 +17,33 @@ import (
 	"github.com/multica-ai/multica/server/internal/migrations"
 )
 
-// These two tests exist because the failure they cover is silent.
+// These tests exist because the failure they cover is silent.
 //
-// Re-labelling a usage row changes its rollup bucket KEY. task_usage has no
-// UPDATE trigger (only BEFORE DELETE), so the rollup's window function can
-// only discover the NEW key from updated_at — the old 'unknown' bucket is
-// nobody's dirty key, is never recomputed, and keeps its old numbers while
-// the new bucket adds the same usage again. The first test proves the ghost
-// is real; the second proves applyUpdates kills it by enqueueing the old key.
+// Re-labelling a usage row changes its rollup bucket KEY. The rollup's window
+// function discovers dirty keys from updated_at, so after a row is re-labelled
+// the only key it can see is the NEW model. Without a guard that enqueues the
+// OLD key, the old bucket is nobody's dirty key: it is never recomputed and
+// keeps its old numbers while the new bucket adds the same usage again — the
+// moved row is counted twice (ruel #35). trg_tu_dirty_hourly (migration 102,
+// ruel #53) now fires BEFORE UPDATE OF provider, model and enqueues the old
+// key automatically, so a bare re-label is guarded. The tests pin both
+// states: one proves the ghost is real when the guard is absent, another
+// proves the trigger kills it.
 
-func TestNaiveRelabelLeavesAGhostBucket(t *testing.T) {
+// TestNaiveRelabelLeavesAGhostBucketWhenGuardAbsent 钉住 ruel #53 的对立面：把
+// 守卫触发器（trg_tu_dirty_hourly 的 UPDATE 分支）摘掉后，裸改写维度列不把旧键入队，
+// 旧桶不会被重算、用量被算两次——这正是 #35 当初的故障形态。
+//
+// 这是突变校验的「摘掉守卫即红」那一半：触发器在迁移 102 里默认存在，裸改写不可能再
+// 留下幽灵；TestDimensionUpdateTriggerEnqueuesOldKey 钉住「守卫在」的常态。
+func TestNaiveRelabelLeavesAGhostBucketWhenGuardAbsent(t *testing.T) {
 	pool := newTestDB(t)
 	ctx := context.Background()
+
+	// 复现 #35 的故障形态：摘掉守卫，让裸改写（不入队旧键）把旧桶留下幽灵。
+	if _, err := pool.Exec(ctx, `DROP TRIGGER IF EXISTS trg_tu_dirty_hourly ON task_usage`); err != nil {
+		t.Fatalf("drop guard trigger: %v", err)
+	}
 
 	created := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
 	fx := seedFixture(t, ctx, pool, "ghost", created)
@@ -41,8 +56,7 @@ func TestNaiveRelabelLeavesAGhostBucket(t *testing.T) {
 	assertHourlyTotals(t, ctx, pool, wsID, 3, 7000)
 	assertBucketEvents(t, ctx, pool, wsID, "unknown", 2)
 
-	// The naive repair: rename the row, bump updated_at, let the rollup
-	// discover it. No old key is enqueued.
+	// 裸改写：改名、bump updated_at，让 rollup 从 updated_at 发现新键。旧键没入队。
 	if _, err := pool.Exec(ctx,
 		`UPDATE task_usage SET model = 'gpt-5.6-sol', updated_at = now() WHERE id = $1`, ghostA); err != nil {
 		t.Fatalf("naive relabel: %v", err)
@@ -50,10 +64,48 @@ func TestNaiveRelabelLeavesAGhostBucket(t *testing.T) {
 	_ = ghostB // stays a placeholder; the ghost bucket keeps counting it
 	materializeHourly(t, ctx, pool, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 
-	// 3 real rows, but 4 events across the buckets: the moved row is counted
-	// in both its old bucket and its new one.
+	// 3 条真实用量，却被算成 4 事件：被改写的行同时落在旧桶和新桶。
 	assertHourlyTotals(t, ctx, pool, wsID, 4, 8000)
 	assertBucketEvents(t, ctx, pool, wsID, "unknown", 2)
+}
+
+// TestDimensionUpdateTriggerEnqueuesOldKey 钉住 ruel #53 的核心不变量：改 task_usage
+// 的维度列（provider/model）必须经 trg_tu_dirty_hourly 触发器把旧键插进
+// task_usage_hourly_dirty，否则旧桶不会被重算、用量被算两次。
+//
+// 这是「守卫在则绿」的那一半：裸改写（不显式入队，只靠触发器）后，脏队列里必须出现旧
+// 键；rollup 之后旧桶消失、合计回到真实值。把触发器摘掉，本条断言立刻变红。
+func TestDimensionUpdateTriggerEnqueuesOldKey(t *testing.T) {
+	pool := newTestDB(t)
+	ctx := context.Background()
+
+	created := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+	fx := seedFixture(t, ctx, pool, "guard", created)
+	wsID := fx.WorkspaceID
+	// 一行 unknown（待改写的占位 model），一行已是正式 model。
+	seedUsage(t, ctx, pool, fx.TaskA, "unknown", 1000, 10, 100, created)
+	seedUsage(t, ctx, pool, fx.TaskB, "gpt-5.6-sol", 4000, 40, 400, created)
+
+	materializeHourly(t, ctx, pool, created.Add(-time.Hour), created.Add(time.Hour))
+	assertHourlyTotals(t, ctx, pool, wsID, 2, 5000)
+	assertBucketEvents(t, ctx, pool, wsID, "unknown", 1)
+
+	// 裸 UPDATE（不走 backfill 的显式入队，只靠触发器守卫）：把 unknown 改成
+	// 已有的 gpt-5.6-sol。
+	oldModel := "unknown"
+	if _, err := pool.Exec(ctx,
+		`UPDATE task_usage SET model = 'gpt-5.6-sol', updated_at = now() WHERE model = $1`, oldModel); err != nil {
+		t.Fatalf("bare re-label: %v", err)
+	}
+
+	// 守卫必须生效：脏队列里出现旧键 unknown，rollup 才会去重算并删掉它。
+	assertDirtyKeyHasModel(t, ctx, pool, wsID, oldModel, true)
+
+	materializeHourly(t, ctx, pool, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+
+	// 没有幽灵：unknown 桶被删（0 事件），合计仍是 2 行 / 5000 token。
+	assertBucketEvents(t, ctx, pool, wsID, "unknown", 0)
+	assertHourlyTotals(t, ctx, pool, wsID, 2, 5000)
 }
 
 func TestApplyUpdatesRebuildsRollupWithoutTheGhost(t *testing.T) {
@@ -235,6 +287,27 @@ func seedTask(t *testing.T, ctx context.Context, pool *pgxpool.Pool, agentID, ru
 		}
 	}
 	return taskID
+}
+
+// assertDirtyKeyHasModel 断言 task_usage_hourly_dirty 里是否存在某个 workspace 下、
+// 某个旧 model 的脏键。触发器 trg_tu_dirty_hourly（迁移 102，ruel #53）在改维度列时
+// 必须把旧键插进来；摘掉触发器则这里找不到，TestDimensionUpdateTriggerEnqueuesOldKey
+// 据此判断守卫是否生效。
+func assertDirtyKeyHasModel(t *testing.T, ctx context.Context, pool *pgxpool.Pool, wsID, model string, want bool) {
+	t.Helper()
+	var n int64
+	if err := pool.QueryRow(ctx, `
+		SELECT COALESCE(count(*), 0)::bigint
+		  FROM task_usage_hourly_dirty WHERE workspace_id = $1 AND model = $2
+	`, wsID, model).Scan(&n); err != nil {
+		t.Fatalf("read dirty queue: %v", err)
+	}
+	if want && n == 0 {
+		t.Fatalf("dirty queue has 0 rows for model=%s in ws %s, want >= 1 (trigger must enqueue the old key)", model, wsID)
+	}
+	if !want && n != 0 {
+		t.Fatalf("dirty queue has %d rows for model=%s in ws %s, want 0", n, model, wsID)
+	}
 }
 
 func materializeHourly(t *testing.T, ctx context.Context, pool *pgxpool.Pool, from, to time.Time) {
