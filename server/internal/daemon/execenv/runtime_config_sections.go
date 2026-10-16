@@ -513,6 +513,35 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 	}
 }
 
+// writeProjectKnowledge emits the Approved Project Knowledge section when the
+// workspace has human-approved entries (PRD chapter 5 cross-agent knowledge).
+// Each entry is a standing decision, not a one-off instruction, so it sits among
+// the durable context (Workspace / Project) rather than the workflow.
+//
+// Upper bound: the server caps the entries it sends and reports the overflow in
+// ProjectKnowledgeOmitted. We render the cap as an explicit disclosure, never as
+// a silent truncation — PRD chapter 5's budget layer forbids quietly dropping a
+// new user instruction, and a knowledge list that grew past the cap must say so
+// rather than let the agent believe the visible slice is the complete set.
+//
+// Statement and Rationale are human-authored but human-approved, so they carry the
+// same trust level as Workspace Context: rendered verbatim, not re-sanitized.
+func writeProjectKnowledge(b *strings.Builder, ctx TaskContextForEnv) {
+	b.WriteString("## Approved Project Knowledge\n\n")
+	b.WriteString("The following decisions were reviewed and approved by a human on this workspace. Treat them as standing guidance for this project: context, not task instructions — when one conflicts with the specific task you were given, the task wins.\n\n")
+	for _, e := range ctx.ProjectKnowledge {
+		fmt.Fprintf(b, "- %s", e.Statement)
+		if e.Rationale != "" {
+			fmt.Fprintf(b, " — %s", e.Rationale)
+		}
+		b.WriteString("\n")
+	}
+	if ctx.ProjectKnowledgeOmitted > 0 {
+		fmt.Fprintf(b, "\n%d more approved entries were omitted: the injected set is capped so project knowledge cannot crowd out your current task instructions. See the workspace's knowledge settings for the full list.\n", ctx.ProjectKnowledgeOmitted)
+	}
+	b.WriteString("\n")
+}
+
 // writeInstructionPrecedence emits the "Agent Identity wins over the issue
 // workflow below" guardrail. Caller gates on kind == kindIssue.
 //
@@ -1084,6 +1113,10 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	}
 
 	writeProjectContext(&b, ctx)
+
+	if len(ctx.ProjectKnowledge) > 0 {
+		writeProjectKnowledge(&b, ctx)
+	}
 
 	if kind == kindIssue {
 		writeInstructionPrecedence(&b)

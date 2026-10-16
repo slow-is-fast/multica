@@ -332,6 +332,15 @@ type ConnectedAppData = runtimeapps.ConnectedApp
 // brief can disclose the truncation.
 const taskIssueStatusCap = 30
 
+// projectKnowledgeCap bounds the approved project-knowledge entries a claim
+// payload carries into the brief. A defensive ceiling, not a product limit:
+// the table grows only by human approval, but a long-lived workspace could
+// still accumulate enough to crowd out the actual task instruction. Overflow is
+// reported via ProjectKnowledgeOmitted so the brief discloses truncation rather
+// than silently dropping entries (PRD chapter 5 budget layer: never silently
+// truncate a new user instruction).
+const projectKnowledgeCap = 30
+
 // TaskIssueStatusData is one active CUSTOM workspace status on the claim wire
 // (MUL-6460). Only the fields an agent needs to choose and write the status
 // travel: key is the CLI argument, name is what users call it in instructions,
@@ -355,6 +364,17 @@ type TaskCancellationActor struct {
 	Type string `json:"type"`
 	ID   string `json:"id,omitempty"`
 	Name string `json:"name,omitempty"`
+}
+
+// ProjectKnowledgeData is one approved project-knowledge entry (PRD chapter 5
+// cross-agent knowledge) carried to the daemon for brief injection. Only the
+// human-facing fields travel; the workspace boundary is already enforced by the
+// server-side query, and provenance (source task/issue/comment) is intentionally
+// omitted so the agent reads the entry as standing guidance, not a comment thread.
+type ProjectKnowledgeData struct {
+	ID        string `json:"id"`
+	Statement string `json:"statement"`
+	Rationale string `json:"rationale,omitempty"`
 }
 
 type AgentTaskResponse struct {
@@ -419,6 +439,19 @@ type AgentTaskResponse struct {
 	ProjectTitle         string                `json:"project_title,omitempty"`       // for surfacing in agent context
 	ProjectDescription   string                `json:"project_description,omitempty"` // durable project-level context injected into the brief
 	ProjectResources     []ProjectResourceData `json:"project_resources,omitempty"`   // resources attached to the project
+	// ProjectKnowledge is this workspace's approved project-knowledge (PRD
+	// chapter 5 cross-agent knowledge). Injected into the brief so a
+	// human-approved decision survives across runs. The server already filtered
+	// strictly by workspace, so cross-workspace entries never reach the daemon.
+	// Capped at projectKnowledgeCap; ProjectKnowledgeOmitted carries the overflow
+	// count so the brief can disclose truncation instead of silently dropping
+	// entries (PRD chapter 5: never silently truncate a new user instruction).
+	// Empty for a workspace with no approved knowledge.
+	ProjectKnowledge []ProjectKnowledgeData `json:"project_knowledge,omitempty"`
+	// ProjectKnowledgeOmitted is how many approved entries the cap dropped, so
+	// the brief can say the list is incomplete rather than present the truncated
+	// set as the whole one.
+	ProjectKnowledgeOmitted int `json:"project_knowledge_omitted,omitempty"`
 	CreatedAt            string                `json:"created_at"`
 	PriorSessionID       string                `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
 	PriorWorkDir         string                `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
