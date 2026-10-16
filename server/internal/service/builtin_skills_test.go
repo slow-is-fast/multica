@@ -151,7 +151,7 @@ func TestBuiltinSkillsFrontmatterIsStrictYAML(t *testing.T) {
 
 	for _, skill := range skills {
 		t.Run(skill.Name, func(t *testing.T) {
-			content := skill.Content
+			content := normalizeLineEndings(skill.Content)
 			if !strings.HasPrefix(content, "---\n") {
 				t.Fatalf("SKILL.md must lead with a --- frontmatter block")
 			}
@@ -859,10 +859,19 @@ func findSkill(t *testing.T, name string) (AgentSkillData, bool) {
 	return AgentSkillData{}, false
 }
 
+// normalizeLineEndings folds Windows CRLF to LF so line-based frontmatter
+// checks behave identically no matter how the repo was cloned (core.autocrlf
+// can hand a test CRLF bytes even when the file is LF in the tree). A no-op on
+// already-LF content, so Linux CI is unaffected.
+func normalizeLineEndings(s string) string {
+	return strings.ReplaceAll(s, "\r\n", "\n")
+}
+
 // splitFrontmatter returns the top-level scalar keys of a leading YAML
 // frontmatter block, the body after it, and whether a block was found. It only
 // understands flat `key: value` lines — enough for the template's frontmatter.
 func splitFrontmatter(content string) (map[string]string, string, bool) {
+	content = normalizeLineEndings(content)
 	if !strings.HasPrefix(content, "---\n") {
 		return nil, content, false
 	}
