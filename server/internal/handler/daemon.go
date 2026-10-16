@@ -28,6 +28,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/ruel/knowledge"
+	"github.com/multica-ai/multica/server/internal/ruel/summary"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -4401,6 +4402,13 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// input is not silently dropped. Agent replays are restricted to explicit
 	// mentions and recorded worker inputs; see reconcileCommentsOnCompletion.
 	h.reconcileCommentsOnCompletion(r.Context(), task)
+	// #50 压缩层：交付游标已确认后，从 Run 输出评论提取 multica-run-summary 块，
+	// 把决定落成待审知识条目。失败隔离——压缩层异常绝不能让完成回调报错，否则
+	// daemon 会重试终态回调，破坏「终态只落一次」的保证（P0-4）。
+	if err := summary.Produce(r.Context(), h.DB, task); err != nil {
+		slog.Warn("压缩层：生成总结条目失败（已隔离，不影响完成回调）",
+			"task_id", uuidToString(task.ID), "error", err)
+	}
 	// The terminal transaction and completion reconciliation are committed.
 	// Wake the owning runtime now so queued work that was blocked by this
 	// task's agent capacity or serialization key is re-claimed immediately.

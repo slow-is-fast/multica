@@ -1050,6 +1050,7 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 		}
 		b.WriteString("**Post exactly ONE comment per run — your final result, before this turn exits.** Do NOT post progress updates or plans along the way. Only a scheduled wakeup check whose `[WAKEUP]` block offers `multica issue wakeup checkin` may check in instead of commenting, when it found nothing that needs a reply.\n\n")
 		b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n\n")
+		b.WriteString("**Run summary block:** at the end of your single final comment, after the natural-language result, append EXACTLY ONE fenced code block tagged `multica-run-summary` containing a JSON object: `{\"version\":1,\"decisions\":[{\"what\":\"…\",\"why\":\"…\",\"refs\":[\"…\"]}],\"open_items\":[{\"what\":\"…\",\"why_left\":\"…\"}]}`. `decisions` are conclusions worth keeping as project knowledge — a human reviews and approves them later, so write them as standalone statements someone else can act on. Include the block ONLY when you actually reached decisions; omit it entirely if you made none. Never put anything other than the JSON object inside the block.\n\n")
 		b.WriteString("**Delivering files here:** pass `--attachment <path>` to `multica issue comment add` (repeatable) — the only way a screenshot or artifact reaches the reader.\n")
 		writeInlineBlocksPolicy(b)
 	}
