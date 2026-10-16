@@ -358,16 +358,19 @@ ORDER BY u.created_at, u.id;
 -- name: RuelListWorkspaceTaskUsageInWindow :many
 -- Ruel #41: the same window scoped to a workspace.
 --
--- agent_task_queue has no workspace column, so the scope walks task -> issue ->
--- workspace. **A run without an issue is invisible here**: its usage never
--- enters a workspace total. That is a real gap, not an oversight — the caller
--- cannot count what the query cannot see, so it is stated in the budget's
--- documentation rather than silently absorbed.
+-- The scope walks task -> agent -> workspace, NOT task -> issue -> workspace.
+-- agent_task_queue.issue_id is nullable (migration 033: chat tasks need no
+-- issue), so a run without an issue was invisible to the old issue-walk query
+-- and its usage never entered a workspace total — a real blind spot (ruel #52).
+-- The hourly rollup already resolves workspace via the agent (LEFT JOIN issue),
+-- so keying the budget off the agent keeps the two paths consistent. Every run
+-- has an agent, so the JOIN is safe; an agent's workspace is the workspace its
+-- runs are billed to.
 SELECT u.*
 FROM task_usage u
 JOIN agent_task_queue t ON t.id = u.task_id
-JOIN issue i ON i.id = t.issue_id
-WHERE i.workspace_id = @workspace_id
+JOIN agent a ON a.id = t.agent_id
+WHERE a.workspace_id = @workspace_id
   AND u.created_at >= @since
   AND u.created_at < @until
 ORDER BY u.created_at, u.id;

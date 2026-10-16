@@ -101,6 +101,25 @@ func (f *ruelPeriodFixture) runFor(t *testing.T, agentID, issueID string) string
 	return taskID
 }
 
+// runForNoIssue 给一个 agent 起一轮**没有 Issue** 的 Run（chat 任务形态，issue_id
+// 为 NULL）。这是 #52 要修的盲区：旧查询走 task -> issue -> workspace，会把这类 Run
+// 直接 JOIN 掉，其用量永远进不了 workspace 合计。
+func (f *ruelPeriodFixture) runForNoIssue(t *testing.T, agentID string) string {
+	t.Helper()
+	var taskID string
+	if err := f.pool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority,
+			originator_user_id, accountable_user_id, originator_source)
+		VALUES ($1, $2, NULL, 'completed', 0, $3, $3, 'direct_human')
+		RETURNING id`, agentID, f.runtimeID, f.userID).Scan(&taskID); err != nil {
+		t.Fatalf("seed no-issue run: %v", err)
+	}
+	t.Cleanup(func() {
+		f.pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+	return taskID
+}
+
 // usage 挂一条用量行。createdAt 显式给，因为窗口边界只能靠它来测。
 //
 // provider 用 seq 区分：task_usage 上有 (task_id, provider, model) 唯一约束，同一轮
@@ -355,5 +374,38 @@ func TestPeriodBudgetGateUnconfiguredStaysOutOfTheWay(t *testing.T) {
 	if err := f.svc.ruelGuardPeriodBudget(context.Background(),
 		util.MustParseUUID(f.agentA), util.MustParseUUID(f.workspaceID), util.MustParseUUID(f.issueA), "unconfigured_test"); err != nil {
 		t.Fatalf("四个维度都没设却挡了派单：%v", err)
+	}
+}
+
+// TestPeriodBudgetWorkspaceScopeIncludesRunsWithoutIssue 钉住 #52：没有 Issue 的
+// Run（chat 任务，迁移 033 让 issue_id 可空）其用量必须进 workspace 合计。
+//
+// 为什么必须单开：旧查询走 task -> issue -> workspace，issue_id 为 NULL 的 Run 被
+// JOIN 直接剔除，workspace 预算对这类 Run 永远失明。改成 task -> agent -> workspace
+// 后，这类 Run 的用量由 agent 的 workspace 计入。没有这条测试，查询侧改路径有没有真
+// 的覆盖到无 Issue 的 Run，无从验证——而它恰好是 #52 要修的那一个口子。
+func TestPeriodBudgetWorkspaceScopeIncludesRunsWithoutIssue(t *testing.T) {
+	f := seedRuelPeriodFixture(t)
+	now := time.Now().UTC()
+	window := periodWindow(now, PeriodDay)
+
+	// 有 Issue 的 Run：基准，确认旧路径本来就数得到这一条。
+	withIssue := f.runFor(t, f.agentA, f.issueA)
+	f.usage(t, withIssue, "glm-5", 1_000_000, now, 1)
+
+	// 无 Issue 的 Run（chat 任务）：这是 #52 要修的盲区。
+	noIssue := f.runForNoIssue(t, f.agentA)
+	f.usage(t, noIssue, "glm-5", 1_000_000, now, 2)
+
+	ctx := context.Background()
+	wsID := util.MustParseUUID(f.workspaceID)
+	acc, err := f.svc.ruelPeriodCostFor(ctx, PeriodBudgetDimension{ScopeWorkspace, PeriodDay},
+		util.MustParseUUID(f.agentA), wsID, window)
+	if err != nil {
+		t.Fatalf("workspace 窗口查询: %v", err)
+	}
+	// 两轮 Run 各一条可计价用量（glm-5 / 一百万 token ≈ $1.00），合计 2 行。
+	if acc.PricedRows != 2 {
+		t.Fatalf("workspace 合计算到 %d 条可计价用量, want 2——无 Issue 的 Run 必须被计入", acc.PricedRows)
 	}
 }

@@ -832,8 +832,8 @@ const ruelListWorkspaceTaskUsageInWindow = `-- name: RuelListWorkspaceTaskUsageI
 SELECT u.id, u.task_id, u.provider, u.model, u.input_tokens, u.output_tokens, u.cache_read_tokens, u.cache_write_tokens, u.created_at, u.updated_at, u.cost_usd_ticks
 FROM task_usage u
 JOIN agent_task_queue t ON t.id = u.task_id
-JOIN issue i ON i.id = t.issue_id
-WHERE i.workspace_id = $1
+JOIN agent a ON a.id = t.agent_id
+WHERE a.workspace_id = $1
   AND u.created_at >= $2
   AND u.created_at < $3
 ORDER BY u.created_at, u.id
@@ -847,11 +847,12 @@ type RuelListWorkspaceTaskUsageInWindowParams struct {
 
 // Ruel #41: the same window scoped to a workspace.
 //
-// agent_task_queue has no workspace column, so the scope walks task -> issue ->
-// workspace. **A run without an issue is invisible here**: its usage never
-// enters a workspace total. That is a real gap, not an oversight — the caller
-// cannot count what the query cannot see, so it is stated in the budget's
-// documentation rather than silently absorbed.
+// The scope walks task -> agent -> workspace, NOT task -> issue -> workspace.
+// agent_task_queue.issue_id is nullable (migration 033: chat tasks need no
+// issue), so a run without an issue was invisible to the old issue-walk query
+// and its usage never entered a workspace total — a real blind spot (ruel #52).
+// The hourly rollup already resolves workspace via the agent, so keying the
+// budget off the agent keeps the two paths consistent.
 func (q *Queries) RuelListWorkspaceTaskUsageInWindow(ctx context.Context, arg RuelListWorkspaceTaskUsageInWindowParams) ([]TaskUsage, error) {
 	rows, err := q.db.Query(ctx, ruelListWorkspaceTaskUsageInWindow, arg.WorkspaceID, arg.Since, arg.Until)
 	if err != nil {
